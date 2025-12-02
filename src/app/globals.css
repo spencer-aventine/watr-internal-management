@@ -1,0 +1,856 @@
+/* src/app/globals.css */
+
+/* ---------- Base theme ---------- */
+
+:root {
+  --color-bg: #f3f4f6;
+  --color-card: #ffffff;
+  --color-border: #e5e7eb;
+  --color-heading: #111827;
+  --color-body: #4b5563;
+  --color-accent: #00b2cd;
+  --color-accent-dark: #006b7b;
+}
+
+/* Basic reset + typography */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  line-height: 1.5;
+  -webkit-text-size-adjust: 100%;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+    sans-serif;
+}
+
+body {
+  margin: 0;
+  background-color: var(--color-bg);
+  color: var(--color-body);
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+/* Generic card */
+
+.card {
+  background-color: var(--color-card);
+  border-radius: 0.75rem;
+  border: 1px solid var(--color-border);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.04);
+}
+
+/* ---------- IMS shell layout (sidebar + header) ---------- */
+
+.ims-shell {
+  display: flex;
+  min-height: 100vh;
+  background-color: var(--color-bg);
+}
+
+/* Sidebar */
+
+.ims-sidebar {
+  width: 240px;
+  background-color: #020617;
+  color: #e5e7eb;
+  padding: 1.5rem 1.25rem;
+  display: flex;
+  flex-direction: column;
+}
+
+.ims-sidebar-header {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 2rem;
+}
+
+/* Logo box + image */
+
+.ims-logo-mark {
+  width: 36px;
+  height: 36px;
+  border-radius: 0.75rem;
+  background-color: #ffffff;
+  border: 1px solid #e5e7eb;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.ims-logo-img {
+  display: block;
+  max-width: 80%;
+  max-height: 80%;
+  width: auto; /* keep aspect ratio */
+  height: auto; /* keep aspect ratio */
+}
+
+.ims-logo-text {
+  display: flex;
+  flex-direction: column;
+}
+
+.ims-logo-title {
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+.ims-logo-subtitle {
+  font-size: 0.75rem;
+  color: #9ca3af;
+}
+
+.ims-sidebar-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.ims-sidebar-link {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  border-radius: 0.5rem;
+  font-size: 0.9rem;
+  color: #e5e7eb;
+  transition: background-color 0.12s ease, color 0.12s ease;
+}
+
+.ims-sidebar-link:hover {
+  background-color: rgba(148, 163, 184, 0.16);
+}
+
+.ims-sidebar-link--active {
+  background-color: #0f172a;
+  color: #ffffff;
+}
+
+.ims-sidebar-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 9999px;
+  background-color: rgba(148, 163, 184, 0.8);
+}
+
+.ims-sidebar-link--active .ims-sidebar-dot {
+  background-color: var(--color-accent);
+}
+
+/* Main column */
+
+.ims-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Header */
+
+.ims-header {
+  height: 64px;
+  padding: 0 1.75rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background-color: #ffffff;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.ims-header-search {
+  flex: 1;
+  max-width: 520px;
+}
+
+.ims-search-input {
+  width: 100%;
+  border-radius: 9999px;
+  border: 1px solid var(--color-border);
+  padding: 0.5rem 1rem;
+  font-size: 0.9rem;
+  outline: none;
+  background-color: #f9fafb;
+}
+
+.ims-search-input:focus {
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 1px rgba(0, 178, 205, 0.3);
+  background-color: #ffffff;
+}
+
+.ims-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-left: 1.5rem;
+}
+
+.ims-icon-button {
+  width: 32px;
+  height: 32px;
+  border-radius: 9999px;
+  border: none;
+  background-color: #f3f4f6;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.9rem;
+}
+
+.ims-add-button {
+  border-radius: 9999px;
+  border: none;
+  padding: 0.45rem 1rem;
+  font-size: 0.9rem;
+  font-weight: 600;
+  background-color: var(--color-accent);
+  color: #ffffff;
+}
+
+.ims-add-button:hover {
+  background-color: var(--color-accent-dark);
+}
+
+/* ---------- Page content wrapper ---------- */
+
+.ims-content {
+  padding: 1.75rem;
+}
+
+.ims-page-header {
+  margin-bottom: 1.5rem;
+}
+
+.ims-page-title {
+  font-size: 1.5rem;
+  color: var(--color-heading);
+}
+
+.ims-page-subtitle {
+  margin-top: 0.25rem;
+  font-size: 0.9rem;
+  color: var(--color-body);
+}
+
+.ims-page-header--with-actions {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1.5rem;
+}
+
+.ims-page-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+/* Buttons */
+
+.ims-primary-button,
+.ims-secondary-button {
+  border-radius: 9999px;
+  padding: 0.45rem 1.1rem;
+  font-size: 0.9rem;
+  font-weight: 600;
+  border: 1px solid transparent;
+}
+
+.ims-primary-button {
+  background-color: var(--color-accent);
+  color: #ffffff;
+  border-color: var(--color-accent);
+}
+
+.ims-primary-button:disabled {
+  opacity: 0.7;
+  cursor: default;
+}
+
+.ims-primary-button:hover:not(:disabled) {
+  background-color: var(--color-accent-dark);
+  border-color: var(--color-accent-dark);
+}
+
+.ims-secondary-button {
+  background-color: #ffffff;
+  color: #111827;
+  border-color: var(--color-border);
+}
+
+.ims-secondary-button:hover {
+  background-color: #f9fafb;
+}
+
+/* ---------- Dashboard metrics ---------- */
+
+.ims-metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 1rem;
+}
+
+.ims-metric-card {
+  border-radius: 1.25rem;
+  border: 1px solid rgba(148, 163, 184, 0.4);
+  background: radial-gradient(circle at top left, #f9fafb, #eef2ff);
+  text-align: left;
+  cursor: pointer;
+  display: flex;
+  align-items: center; /* center icon vertically */
+  gap: 0.75rem;
+  padding: 1rem 1.1rem;
+  transition:
+    border-color 120ms ease,
+    box-shadow 120ms ease,
+    transform 120ms ease,
+    background 120ms ease;
+}
+
+.ims-metric-card:hover {
+  border-color: rgba(0, 178, 205, 0.4);
+  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.08);
+  transform: translateY(-1px);
+}
+
+.ims-metric-card--active {
+  border-color: #00b2cd;
+  background: linear-gradient(135deg, #e0f7fb, #eef2ff);
+  box-shadow: 0 0 0 1px rgba(0, 178, 205, 0.55),
+    0 12px 35px rgba(15, 23, 42, 0.18);
+}
+
+.ims-metric-card--active .ims-metric-icon {
+  background-color: rgba(0, 178, 205, 0.12);
+}
+
+/* Metric icon box */
+
+.ims-metric-icon {
+  flex: 0 0 auto;
+  width: 36px;
+  height: 36px;
+  border-radius: 0.75rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: rgba(148, 163, 184, 0.12);
+  font-size: 1.4rem;
+}
+
+/* Warning variant just changes background colour */
+
+.ims-metric-icon--warning {
+  background-color: rgba(248, 180, 0, 0.16);
+}
+
+.ims-metric-body {
+  display: flex;
+  flex-direction: column;
+}
+
+.ims-metric-label {
+  font-size: 0.8rem;
+  color: #6b7280;
+}
+
+.ims-metric-value {
+  font-size: 1.4rem;
+  font-weight: 600;
+  color: #111827;
+}
+
+.ims-metric-note {
+  font-size: 0.8rem;
+  color: #6b7280;
+}
+
+.ims-metric-cta {
+  margin-top: 0.25rem;
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: #00b2cd;
+}
+
+/* Keyboard focus */
+.ims-metric-card:focus-visible {
+  outline: 2px solid #00b2cd;
+  outline-offset: 2px;
+}
+
+/* ---------- Forms (add/edit product) ---------- */
+
+.ims-form-grid {
+  margin-top: 1.5rem;
+  display: grid;
+  grid-template-columns: minmax(0, 1.7fr) minmax(0, 1.1fr);
+  gap: 1rem;
+}
+
+@media (max-width: 900px) {
+  .ims-form-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.ims-form-section {
+  padding: 1.5rem;
+}
+
+.ims-form-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.ims-form-section-title {
+  font-size: 1rem;
+  font-weight: 600;
+  margin-bottom: 0.25rem;
+}
+
+.ims-form-section-subtitle {
+  font-size: 0.85rem;
+  color: #6b7280;
+  margin-bottom: 1rem;
+}
+
+.ims-form-divider {
+  border: 0;
+  height: 1px;
+  background-color: var(--color-border);
+  margin: 1.25rem 0 1rem;
+}
+
+.ims-field {
+  margin-bottom: 0.9rem;
+}
+
+.ims-field-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+@media (max-width: 700px) {
+  .ims-field-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.ims-field-label {
+  display: block;
+  font-size: 0.8rem;
+  font-weight: 500;
+  margin-bottom: 0.25rem;
+  color: #4b5563;
+}
+
+.ims-field-input {
+  width: 100%;
+  border-radius: 0.5rem;
+  border: 1px solid var(--color-border);
+  padding: 0.45rem 0.65rem;
+  font-size: 0.9rem;
+  background-color: #ffffff;
+}
+
+.ims-field-input:focus {
+  outline: none;
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 1px rgba(0, 178, 205, 0.3);
+}
+
+.ims-field-textarea {
+  resize: vertical;
+  min-height: 80px;
+}
+
+.ims-field-help {
+  margin-top: 0.25rem;
+  font-size: 0.75rem;
+  color: #6b7280;
+}
+
+.ims-required {
+  color: #ef4444;
+  margin-left: 0.15rem;
+}
+
+/* Chips (subcategories) */
+
+.ims-chip-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.ims-chip {
+  border-radius: 9999px;
+  padding: 0.22rem 0.6rem;
+  font-size: 0.8rem;
+  border: 1px solid var(--color-border);
+  background-color: #ffffff;
+}
+
+.ims-chip--selected {
+  border-color: var(--color-accent);
+  background-color: rgba(0, 178, 205, 0.08);
+}
+
+/* Toggle */
+
+.ims-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  cursor: pointer;
+}
+
+.ims-toggle input {
+  display: none;
+}
+
+.ims-toggle-slider {
+  width: 34px;
+  height: 18px;
+  border-radius: 9999px;
+  background-color: #e5e7eb;
+  position: relative;
+  transition: background-color 0.15s ease;
+}
+
+.ims-toggle-slider::before {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 9999px;
+  background-color: #ffffff;
+  transition: transform 0.15s ease;
+}
+
+.ims-toggle input:checked + .ims-toggle-slider {
+  background-color: var(--color-accent);
+}
+
+.ims-toggle input:checked + .ims-toggle-slider::before {
+  transform: translateX(16px);
+}
+
+.ims-toggle-label {
+  font-size: 0.85rem;
+  color: #4b5563;
+}
+
+/* Error / alerts */
+
+.ims-form-error {
+  margin-top: 1rem;
+  font-size: 0.85rem;
+  color: #b91c1c;
+}
+
+.ims-alert {
+  margin-top: 0.5rem;
+  margin-bottom: 0.75rem;
+  padding: 0.45rem 0.7rem;
+  border-radius: 0.5rem;
+  font-size: 0.8rem;
+}
+
+.ims-alert--info {
+  background-color: #eff6ff;
+  color: #1d4ed8;
+  border: 1px solid #bfdbfe;
+}
+
+.ims-alert--error {
+  background-color: #fef2f2;
+  color: #b91c1c;
+  border: 1px solid #fecaca;
+}
+
+/* ---------- Tables (inventory) ---------- */
+
+.ims-table-card {
+  margin-top: 0.75rem;
+  padding: 1.25rem 1.25rem 1rem;
+}
+
+.ims-table-card--secondary {
+  margin-top: 1.5rem;
+  background-color: #f9fafb;
+}
+
+.ims-table-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.75rem;
+}
+
+.ims-table-count {
+  font-size: 0.8rem;
+  color: #6b7280;
+}
+
+.ims-table-wrapper {
+  overflow-x: auto;
+}
+
+.ims-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+
+.ims-table th,
+.ims-table td {
+  padding: 0.45rem 0.5rem;
+  border-bottom: 1px solid #e5e7eb;
+  text-align: left;
+}
+
+.ims-table th {
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: #6b7280;
+  background-color: #f9fafb;
+}
+
+.ims-table--compact th,
+.ims-table--compact td {
+  padding: 0.35rem 0.4rem;
+}
+
+.ims-table tr:hover td {
+  background-color: #f9fafb;
+}
+
+.ims-table-empty {
+  font-size: 0.85rem;
+  color: #6b7280;
+}
+
+.ims-table-link {
+  color: #1d4ed8;
+  text-decoration: none;
+}
+
+.ims-table-link:hover {
+  text-decoration: underline;
+}
+
+/* Status tags */
+
+.ims-status-tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.1rem 0.5rem;
+  border-radius: 9999px;
+  font-size: 0.75rem;
+  font-weight: 500;
+  border: 1px solid transparent;
+}
+
+.ims-status-tag--active {
+  color: #166534;
+  background-color: #dcfce7;
+  border-color: #22c55e33;
+}
+
+.ims-status-tag--inactive {
+  color: #92400e;
+  background-color: #ffedd5;
+  border-color: #f9731633;
+}
+
+/* File label as button */
+
+.ims-file-label {
+  cursor: pointer;
+}
+/* ---------- Kanban board (Projects & WIP) ---------- */
+
+.ims-kanban {
+  margin-top: 1rem;
+  display: flex;
+  gap: 1.5rem;
+  align-items: flex-start;
+  padding-bottom: 0.5rem;
+  overflow-x: auto;
+}
+
+.ims-kanban-column {
+  flex: 0 0 320px;              /* fixed column width like a kanban lane */
+  max-width: 340px;
+  background-color: #f9fafb;
+  border-radius: 1rem;
+  border: 1px solid #e5e7eb;
+  padding: 0.9rem;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.04);
+  min-height: 60vh;             /* give columns some height */
+}
+
+@media (max-width: 900px) {
+  .ims-kanban-column {
+    flex: 0 0 280px;
+  }
+}
+
+.ims-kanban-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.75rem;
+}
+
+.ims-kanban-header-left {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.ims-kanban-title {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: #111827;
+}
+
+.ims-kanban-status-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 9999px;
+}
+
+.ims-kanban-status-dot--wip {
+  background-color: #f97316; /* amber */
+}
+
+.ims-kanban-status-dot--complete {
+  background-color: #16a34a; /* green */
+}
+
+.ims-kanban-count-pill {
+  padding: 0.15rem 0.6rem;
+  border-radius: 9999px;
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: #374151;
+  background-color: #e5e7eb;
+}
+
+/* Cards */
+
+.ims-kanban-card {
+  background-color: #ffffff;
+  border-radius: 0.75rem;
+  border: 1px solid #e5e7eb;
+  padding: 0.8rem 0.85rem 0.7rem;
+  margin-bottom: 0.75rem;
+  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.04);
+  display: flex;
+  flex-direction: column;
+}
+
+.ims-kanban-card--new {
+  border-style: dashed;
+  background: #ecfeff;
+}
+
+.ims-kanban-card--complete {
+  background-color: #fefce8;
+}
+
+.ims-kanban-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 0.4rem;
+}
+
+.ims-kanban-card-title {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: #111827;
+}
+
+.ims-kanban-card-subtitle {
+  font-size: 0.78rem;
+  color: #6b7280;
+  margin-top: 0.2rem;
+}
+
+.ims-kanban-card-body {
+  font-size: 0.82rem;
+  margin-bottom: 0.5rem;
+}
+
+.ims-kanban-card-footer {
+  border-top: 1px solid #e5e7eb;
+  padding-top: 0.45rem;
+  margin-top: 0.3rem;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.ims-kanban-products {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.ims-kanban-products li {
+  display: flex;
+  flex-direction: column;
+  margin-bottom: 0.25rem;
+}
+
+.ims-kanban-product-main {
+  font-weight: 500;
+  color: #111827;
+}
+
+.ims-kanban-product-secondary {
+  font-size: 0.78rem;
+  color: #6b7280;
+}
+
+.ims-kanban-card-empty {
+  font-size: 0.8rem;
+  color: #6b7280;
+}
+
+/* New project form tweaks inside the WIP column */
+
+.ims-new-project-form {
+  margin-top: 0.4rem;
+}
+
+.ims-project-line {
+  padding: 0.4rem 0.5rem 0.6rem;
+  border-radius: 0.5rem;
+  background-color: #ffffff;
+  border: 1px dashed #e5e7eb;
+  margin-bottom: 0.5rem;
+}
+
+.ims-project-line-remove {
+  margin-top: 0.3rem;
+  font-size: 0.8rem;
+  padding-inline: 0.8rem;
+}
