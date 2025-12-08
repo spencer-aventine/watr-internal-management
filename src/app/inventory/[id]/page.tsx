@@ -989,14 +989,19 @@ export default function ProductDetailPage() {
                     Item type
                   </label>
                   {isEditing ? (
-                    <input
+                    <select
                       id="itemType"
                       className="ims-field-input"
                       value={form.itemType}
                       onChange={(e) =>
                         handleChange("itemType", e.target.value)
                       }
-                    />
+                    >
+                      <option value="">Select type…</option>
+                      <option value="product">Product</option>
+                      <option value="sub assembly">Sub Assembly</option>
+                      <option value="component">Component</option>
+                    </select>
                   ) : (
                     <div>{item.itemType || "—"}</div>
                   )}

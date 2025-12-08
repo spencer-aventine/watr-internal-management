@@ -100,7 +100,8 @@ export default function HomePage() {
     if (threshold == null || threshold <= 0) {
       return false;
     }
-    return getTotalStock(item) <= threshold;
+    const onHand = item.inventoryQty ?? 0;
+    return onHand <= threshold;
   });
 
   const inventoryValue = items.reduce((sum, item) => {
@@ -117,7 +118,7 @@ export default function HomePage() {
     case "low":
       tableTitle = "Low stock items";
       tableDescription =
-        "Products where the overall stock (inventory, reserved, WIP and completed) is at or below their low-stock threshold.";
+        "Products where on-hand inventory is at or below their low-stock threshold.";
       tableItems = lowStockItems;
       break;
     case "value":
