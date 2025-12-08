@@ -5,11 +5,13 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { db } from "@/lib/firebase";
 import { collection, getDocs, query, orderBy } from "firebase/firestore";
+import { getInventoryDetailPath } from "@/lib/inventoryPaths";
 
 type DashboardItem = {
   id: string;
   sku: string;
   name: string;
+  itemType?: string;
   salesPrice?: number;
   standardCost?: number;
   inventoryQty?: number | null;
@@ -48,6 +50,7 @@ export default function HomePage() {
               typeof data.standardCost === "number"
                 ? data.standardCost
                 : undefined,
+            itemType: data.itemType ?? data.rawCsvItemType ?? "",
             inventoryQty:
               typeof data.inventoryQty === "number"
                 ? data.inventoryQty
@@ -330,7 +333,7 @@ export default function HomePage() {
                       <tr key={item.id}>
                         <td>
                           <Link
-                            href={`/inventory/${item.id}`}
+                            href={getInventoryDetailPath(item.id, item.itemType)}
                             className="ims-table-link"
                           >
                             {item.name}
@@ -350,7 +353,7 @@ export default function HomePage() {
                       <tr key={item.id}>
                         <td>
                           <Link
-                            href={`/inventory/${item.id}`}
+                            href={getInventoryDetailPath(item.id, item.itemType)}
                             className="ims-table-link"
                           >
                             {item.name}
@@ -378,7 +381,7 @@ export default function HomePage() {
                     <tr key={item.id}>
                       <td>
                         <Link
-                          href={`/inventory/${item.id}`}
+                          href={getInventoryDetailPath(item.id, item.itemType)}
                           className="ims-table-link"
                         >
                           {item.name}

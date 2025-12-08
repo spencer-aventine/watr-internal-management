@@ -1,10 +1,11 @@
-// src/app/inventory/[id]/page.tsx
+// src/app/inventory/components/[id]/page.tsx
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { db } from "@/lib/firebase";
+import { getInventoryDetailPath } from "@/lib/inventoryPaths";
 import {
   doc,
   getDoc,
@@ -72,6 +73,7 @@ type LinkedItem = {
   id: string;
   sku: string;
   name: string;
+  itemType?: string;
 };
 
 type LocationOption = {
@@ -198,6 +200,7 @@ export default function ProductDetailPage() {
             id: d.id,
             sku: data.sku ?? "",
             name: data.name ?? "",
+            itemType: data.itemType ?? data.rawCsvItemType ?? "",
           };
         });
         setAllItems(all);
@@ -856,7 +859,7 @@ export default function ProductDetailPage() {
           return (
             <li key={id}>
               <Link
-                href={`/inventory/${linked.id}`}
+                href={getInventoryDetailPath(linked.id, linked.itemType)}
                 className="ims-table-link"
               >
                 {linked.name}{" "}

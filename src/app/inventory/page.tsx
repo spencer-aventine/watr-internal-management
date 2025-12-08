@@ -13,6 +13,10 @@ import {
   query,
   orderBy,
 } from "firebase/firestore";
+import {
+  getInventoryDetailPath,
+  normalizeItemType,
+} from "@/lib/inventoryPaths";
 
 type FirestoreItem = {
   id: string;
@@ -73,11 +77,6 @@ const allColumns: ColumnConfig[] = [
   { key: "status", label: "Status" },
 ];
 
-const normalizeItemType = (value?: string | null) => {
-  if (!value) return "";
-  return value.toString().trim().toLowerCase().replace(/[\s_-]+/g, " ");
-};
-
 const matchesTab = (item: FirestoreItem, tab: TabKey) => {
   const type = normalizeItemType(item.itemType);
   switch (tab) {
@@ -96,7 +95,7 @@ const matchesTab = (item: FirestoreItem, tab: TabKey) => {
   }
 };
 
-function mapCsvRow(row: CsvRow): ImportRow | null {
+const mapCsvRow = (row: CsvRow): ImportRow | null => {
   const sku = String(row["*ItemCode"] ?? "").trim();
   const name = String(row["ItemName"] ?? "").trim();
   if (!sku || !name) return null;
@@ -117,7 +116,7 @@ function mapCsvRow(row: CsvRow): ImportRow | null {
     salesPrice: parseNumber(row["SalesUnitPrice"]),
     rawItemType: row["Item"] || "",
   };
-}
+};
 
 export default function InventoryPage() {
   const [products, setProducts] = useState<FirestoreItem[]>([]);
@@ -127,7 +126,7 @@ export default function InventoryPage() {
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const [activeTab, setActiveTab] = useState<TabKey>("products");
+  const [activeTab, setActiveTab] = useState<TabKey>("components");
   // Table filtering
   const [filterText, setFilterText] = useState("");
   // Column visibility
@@ -369,32 +368,32 @@ export default function InventoryPage() {
                 : `Import ${importPreview.length} products`}
             </button>
           )}
+        </div>
       </div>
-    </div>
 
-    <div className="ims-tab-bar">
-      {tabOptions.map((tab) => {
-        const isActive = tab.key === activeTab;
-        return (
-          <button
-            key={tab.key}
-            type="button"
-            className={
-              "ims-tab-button" + (isActive ? " ims-tab-button--active" : "")
-            }
-            onClick={() => setActiveTab(tab.key)}
-            aria-pressed={isActive}
-          >
-            <span>{tab.label}</span>
-            <span className="ims-tab-count">{tabCounts[tab.key]}</span>
-          </button>
-        );
-      })}
-    </div>
+      <div className="ims-tab-bar">
+        {tabOptions.map((tab) => {
+          const isActive = tab.key === activeTab;
+          return (
+            <button
+              key={tab.key}
+              type="button"
+              className={
+                "ims-tab-button" + (isActive ? " ims-tab-button--active" : "")
+              }
+              onClick={() => setActiveTab(tab.key)}
+              aria-pressed={isActive}
+            >
+              <span>{tab.label}</span>
+              <span className="ims-tab-count">{tabCounts[tab.key]}</span>
+            </button>
+          );
+        })}
+      </div>
 
-    {/* Messages */}
-    {(message || error) && (
-      <div
+      {/* Messages */}
+      {(message || error) && (
+        <div
           className={
             "ims-alert " + (error ? "ims-alert--error" : "ims-alert--info")
           }
@@ -407,9 +406,7 @@ export default function InventoryPage() {
       <section className="card ims-table-card">
         <div className="ims-table-header" style={{ alignItems: "flex-start" }}>
           <div>
-            <h2 className="ims-form-section-title">
-              {activeTabLabel}
-            </h2>
+            <h2 className="ims-form-section-title">{activeTabLabel}</h2>
             <span className="ims-table-count">
               {loading
                 ? "Loading…"
@@ -567,7 +564,7 @@ export default function InventoryPage() {
                           return (
                             <td key={col.key}>
                               <Link
-                                href={`/inventory/${p.id}`}
+                                href={getInventoryDetailPath(p.id, p.itemType)}
                                 className="ims-table-link"
                               >
                                 {p.sku}
@@ -578,7 +575,7 @@ export default function InventoryPage() {
                           return (
                             <td key={col.key}>
                               <Link
-                                href={`/inventory/${p.id}`}
+                                href={getInventoryDetailPath(p.id, p.itemType)}
                                 className="ims-table-link"
                               >
                                 {p.name}
