@@ -14,11 +14,11 @@ type NavItem = {
 const navItems: NavItem[] = [
   { label: "Dashboard", href: "/" },
   { label: "Inventory", href: "/inventory" },
-  { label: "Purchasing", href: "/purchasing" },
-  { label: "WIP & Completions", href: "/projects" },
-  { label: "Assets", href: "/assets" },
+  { label: "Purchasing", href: "/purchasing/history" },
+  { label: "Projects", href: "/projects" },
   { label: "Reporting", href: "/reporting" },
   { label: "Integrations", href: "/integrations" },
+  { label: "Configurator (WiP)", href: "/configurator" },
   { label: "Admin", href: "/admin" },
 ];
 
@@ -72,15 +72,7 @@ export default function ImsShell({ children }: { children: ReactNode }) {
       <div className="ims-main">
         <header className="ims-header">
           {/* Left spacer (no search bar) */}
-          <div />
-          <div className="ims-header-actions">
-            <button className="ims-icon-button" aria-label="Notifications">
-              🔔
-            </button>
-            <Link href="/inventory/new" className="ims-add-button">
-              + Add Product
-            </Link>
-          </div>
+         
         </header>
 
         {children}

@@ -278,7 +278,7 @@ export default function ProjectDetailPage() {
 
             <div className="ims-field-row">
               <div className="ims-field">
-                <span className="ims-field-label">HubSpot deal ID</span>
+                <span className="ims-field-label">HubSpot Project ID</span>
                 <div>{project.hubspotDealId || "—"}</div>
               </div>
               <div className="ims-field">

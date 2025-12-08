@@ -78,7 +78,7 @@ export default function ProjectsWipPage() {
     { id: "line-1", itemId: "", qty: "", mustHaveQty: "" },
   ]);
 
-  // Search (by name or HubSpot deal ID)
+  // Search (by name or HubSpot project ID)
   const [search, setSearch] = useState("");
 
   // Drag state
@@ -655,7 +655,7 @@ export default function ProjectsWipPage() {
 
                   <div className="ims-field">
                     <label className="ims-field-label" htmlFor="dealId">
-                      HubSpot deal ID
+                      HubSpot Project ID
                     </label>
                     <input
                       id="dealId"
@@ -826,7 +826,7 @@ export default function ProjectsWipPage() {
                     </h3>
                     {project.hubspotDealId && (
                       <p className="ims-kanban-card-subtitle">
-                        Deal ID: {project.hubspotDealId}
+                        Project ID: {project.hubspotDealId}
                       </p>
                     )}
                   </div>
@@ -912,7 +912,7 @@ export default function ProjectsWipPage() {
                     </h3>
                     {project.hubspotDealId && (
                       <p className="ims-kanban-card-subtitle">
-                        Deal ID: {project.hubspotDealId}
+                        Project ID: {project.hubspotDealId}
                       </p>
                     )}
                   </div>
@@ -1000,7 +1000,7 @@ export default function ProjectsWipPage() {
                     </h3>
                     {project.hubspotDealId && (
                       <p className="ims-kanban-card-subtitle">
-                        Deal ID: {project.hubspotDealId}
+                        Project ID: {project.hubspotDealId}
                       </p>
                     )}
                   </div>

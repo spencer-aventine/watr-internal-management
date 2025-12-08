@@ -17,6 +17,7 @@ type DashboardItem = {
   wipQty?: number | null;
   completedQty?: number | null;
   location?: string | null;
+  lowStockThreshold?: number | null;
 };
 
 type ActiveView = "total" | "low" | "value" | "locations";
@@ -62,6 +63,10 @@ export default function HomePage() {
               (data.location as string) ??
               (data.primaryLocation as string) ??
               null,
+            lowStockThreshold:
+              typeof data.lowStockThreshold === "number"
+                ? data.lowStockThreshold
+                : null,
           };
         });
         setItems(rows);
@@ -87,23 +92,22 @@ export default function HomePage() {
 
   const totalProducts = items.length;
 
-  // Low stock: still based on overall stock, even though we don't show a "total" column
-  const lowStockItems = items.filter((i) => getTotalStock(i) < 10);
+  const lowStockItems = items.filter((item) => {
+    const threshold =
+      typeof item.lowStockThreshold === "number"
+        ? item.lowStockThreshold
+        : null;
+    if (threshold == null || threshold <= 0) {
+      return false;
+    }
+    return getTotalStock(item) <= threshold;
+  });
 
   const inventoryValue = items.reduce((sum, item) => {
     const qty = getTotalStock(item);
     const price = item.salesPrice ?? item.standardCost ?? 0;
     return sum + qty * price;
   }, 0);
-
-  const distinctLocations = Array.from(
-    new Set(
-      items
-        .map((i) => (i.location ?? "").trim())
-        .filter((v) => v && v.length > 0),
-    ),
-  );
-  const locationCount = distinctLocations.length;
 
   let tableTitle: string;
   let tableDescription: string;
@@ -113,7 +117,7 @@ export default function HomePage() {
     case "low":
       tableTitle = "Low stock items";
       tableDescription =
-        "Products where the overall stock (inventory, reserved, WIP and completed) is fewer than 10 units.";
+        "Products where the overall stock (inventory, reserved, WIP and completed) is at or below their low-stock threshold.";
       tableItems = lowStockItems;
       break;
     case "value":
@@ -198,7 +202,7 @@ export default function HomePage() {
               {loading ? "…" : lowStockItems.length}
             </span>
             <span className="ims-metric-note">
-              Overall stock &lt; 10 units
+              Stock at or below low threshold
             </span>
             <span className="ims-metric-cta">Review low stock</span>
           </div>
@@ -226,29 +230,6 @@ export default function HomePage() {
             <span className="ims-metric-cta">Break down by product</span>
           </div>
         </button>
-
-        <button
-          type="button"
-          className={
-            "ims-metric-card" +
-            (activeView === "locations" ? " ims-metric-card--active" : "")
-          }
-          onClick={() => setActiveView("locations")}
-          aria-pressed={activeView === "locations"}
-          data-active={activeView === "locations" ? "true" : "false"}
-        >
-          <div className="ims-metric-icon">🏢</div>
-          <div className="ims-metric-body">
-            <span className="ims-metric-label">Locations</span>
-            <span className="ims-metric-value">
-              {loading ? "…" : locationCount}
-            </span>
-            <span className="ims-metric-note">
-              Stock, WIP &amp; returns locations
-            </span>
-            <span className="ims-metric-cta">View by location</span>
-          </div>
-        </button>
       </section>
 
       {/* Error / loading messages */}
@@ -266,9 +247,7 @@ export default function HomePage() {
         <div className="ims-table-header">
           <div>
             <h2 className="ims-form-section-title">{tableTitle}</h2>
-            <p className="ims-form-section-subtitle">
-              {tableDescription}
-            </p>
+            <p className="ims-form-section-subtitle">{tableDescription}</p>
           </div>
           {!loading && (
             <span className="ims-table-count">

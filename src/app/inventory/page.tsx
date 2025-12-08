@@ -1,7 +1,7 @@
 // src/app/inventory/page.tsx
 "use client";
 
-import { useEffect, useState, type ChangeEvent } from "react";
+import { useEffect, useMemo, useState, type ChangeEvent } from "react";
 import Link from "next/link";
 import Papa from "papaparse";
 import { db } from "@/lib/firebase";
@@ -54,15 +54,47 @@ type ColumnConfig = {
   label: string;
 };
 
+type TabKey = "products" | "subAssemblies" | "components";
+
+const tabOptions: { key: TabKey; label: string }[] = [
+  { key: "products", label: "Products" },
+  { key: "subAssemblies", label: "Sub-assemblies" },
+  { key: "components", label: "Components" },
+];
+
 // Single source of truth for columns
 const allColumns: ColumnConfig[] = [
   { key: "sku", label: "SKU" },
   { key: "name", label: "Name" },
   { key: "itemType", label: "Type" },
   { key: "standardCost", label: "Standard cost" },
+  { key: "salesPrice", label: "Sales price" },
   { key: "environment", label: "Environment" },
   { key: "status", label: "Status" },
 ];
+
+const normalizeItemType = (value?: string | null) => {
+  if (!value) return "";
+  return value.toString().trim().toLowerCase().replace(/[\s_-]+/g, " ");
+};
+
+const matchesTab = (item: FirestoreItem, tab: TabKey) => {
+  const type = normalizeItemType(item.itemType);
+  switch (tab) {
+    case "products":
+      return type === "product" || type === "products";
+    case "subAssemblies":
+      return (
+        type === "sub assembly" ||
+        type === "sub assemblies" ||
+        type === "subassembly"
+      );
+    case "components":
+      return type === "component" || type === "components" || type === "";
+    default:
+      return false;
+  }
+};
 
 function mapCsvRow(row: CsvRow): ImportRow | null {
   const sku = String(row["*ItemCode"] ?? "").trim();
@@ -95,6 +127,7 @@ export default function InventoryPage() {
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  const [activeTab, setActiveTab] = useState<TabKey>("products");
   // Table filtering
   const [filterText, setFilterText] = useState("");
   // Column visibility
@@ -258,12 +291,35 @@ export default function InventoryPage() {
     setShowColumnMenu(false);
   };
 
+  const tabCounts = useMemo(() => {
+    const counts: Record<TabKey, number> = {
+      products: 0,
+      subAssemblies: 0,
+      components: 0,
+    };
+    products.forEach((product) => {
+      const match = tabOptions.find((tab) => matchesTab(product, tab.key));
+      if (match) {
+        counts[match.key] += 1;
+      }
+    });
+    return counts;
+  }, [products]);
+
+  const itemsForActiveTab = useMemo(
+    () => products.filter((product) => matchesTab(product, activeTab)),
+    [products, activeTab],
+  );
+
+  const activeTabLabel =
+    tabOptions.find((tab) => tab.key === activeTab)?.label ?? "Products";
+
   // Apply text filter
   const filteredProducts = (() => {
     const text = filterText.trim().toLowerCase();
-    if (!text) return products;
+    if (!text) return itemsForActiveTab;
 
-    return products.filter((p) => {
+    return itemsForActiveTab.filter((p) => {
       const values = [
         p.sku,
         p.name,
@@ -313,12 +369,32 @@ export default function InventoryPage() {
                 : `Import ${importPreview.length} products`}
             </button>
           )}
-        </div>
       </div>
+    </div>
 
-      {/* Messages */}
-      {(message || error) && (
-        <div
+    <div className="ims-tab-bar">
+      {tabOptions.map((tab) => {
+        const isActive = tab.key === activeTab;
+        return (
+          <button
+            key={tab.key}
+            type="button"
+            className={
+              "ims-tab-button" + (isActive ? " ims-tab-button--active" : "")
+            }
+            onClick={() => setActiveTab(tab.key)}
+            aria-pressed={isActive}
+          >
+            <span>{tab.label}</span>
+            <span className="ims-tab-count">{tabCounts[tab.key]}</span>
+          </button>
+        );
+      })}
+    </div>
+
+    {/* Messages */}
+    {(message || error) && (
+      <div
           className={
             "ims-alert " + (error ? "ims-alert--error" : "ims-alert--info")
           }
@@ -331,11 +407,15 @@ export default function InventoryPage() {
       <section className="card ims-table-card">
         <div className="ims-table-header" style={{ alignItems: "flex-start" }}>
           <div>
-            <h2 className="ims-form-section-title">Existing products</h2>
+            <h2 className="ims-form-section-title">
+              {activeTabLabel}
+            </h2>
             <span className="ims-table-count">
               {loading
                 ? "Loading…"
-                : `${filteredProducts.length} of ${products.length} items`}
+                : `${filteredProducts.length} of ${itemsForActiveTab.length} ${
+                    itemsForActiveTab.length === 1 ? "item" : "items"
+                  }`}
             </span>
           </div>
 
@@ -465,8 +545,8 @@ export default function InventoryPage() {
 
         {filteredProducts.length === 0 && !loading ? (
           <p className="ims-table-empty">
-            No products match this filter. Try clearing the filter or import
-            from CSV.
+            No {activeTabLabel.toLowerCase()} match this filter or tab. Try
+            clearing the filter or import from CSV.
           </p>
         ) : (
           <div className="ims-table-wrapper">
