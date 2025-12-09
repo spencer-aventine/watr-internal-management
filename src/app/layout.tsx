@@ -2,7 +2,8 @@
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
 import "./globals.css";
-import ImsShell from "./_components/ImsShell";
+import { AuthProvider } from "./_components/AuthProvider";
+import AppShell from "./_components/AppShell";
 
 export const metadata: Metadata = {
   title: "WATR Internal Management System",
@@ -17,7 +18,9 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body>
-        <ImsShell>{children}</ImsShell>
+        <AuthProvider>
+          <AppShell>{children}</AppShell>
+        </AuthProvider>
       </body>
     </html>
   );

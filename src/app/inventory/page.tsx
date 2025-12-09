@@ -23,6 +23,7 @@ type FirestoreItem = {
   sku: string;
   name: string;
   itemType?: string;
+  category?: string | null;
   standardCost?: number;
   salesPrice?: number;
   status?: string;
@@ -146,13 +147,14 @@ export default function InventoryPage() {
       const ref = collection(db, "items");
       const q = query(ref, orderBy("sku"));
       const snapshot = await getDocs(q);
-      const rows: FirestoreItem[] = snapshot.docs.map((doc) => {
-        const data = doc.data() as any;
-        return {
-          id: doc.id,
-          sku: data.sku ?? "",
-          name: data.name ?? "",
-          itemType: data.itemType ?? data.rawCsvItemType ?? "",
+        const rows: FirestoreItem[] = snapshot.docs.map((doc) => {
+          const data = doc.data() as any;
+          return {
+            id: doc.id,
+            sku: data.sku ?? "",
+            name: data.name ?? "",
+            itemType: data.itemType ?? data.rawCsvItemType ?? "",
+            category: data.category ?? null,
           standardCost:
             typeof data.standardCost === "number"
               ? data.standardCost

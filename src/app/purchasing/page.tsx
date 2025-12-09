@@ -14,12 +14,20 @@ import {
   doc,
   increment,
   getDoc,
+  updateDoc,
 } from "firebase/firestore";
 
 type ItemOption = {
   id: string;
   name: string;
   sku: string;
+};
+
+type SupplierOption = {
+  id: string;
+  name: string;
+  contact?: string | null;
+  address?: string | null;
 };
 
 type PurchaseLineState = {
@@ -42,6 +50,9 @@ type PreparedLine = {
 
 type PurchaseFormState = {
   vendorName: string;
+  supplierContact: string;
+  supplierAddress: string;
+  shipTo: string;
   reference: string;
   purchaseDate: string;
   notes: string;
@@ -65,11 +76,20 @@ export default function PurchasingPage() {
   const [lineCounter, setLineCounter] = useState(1);
   const [form, setForm] = useState<PurchaseFormState>({
     vendorName: "",
+    supplierContact: "",
+    supplierAddress: "",
+    shipTo: "",
     reference: "",
     purchaseDate: todayIso(),
     notes: "",
     status: "draft",
   });
+  const [suppliers, setSuppliers] = useState<SupplierOption[]>([]);
+  const [loadingSuppliers, setLoadingSuppliers] = useState(true);
+  const [selectedSupplierId, setSelectedSupplierId] = useState("");
+  const [supplierSaving, setSupplierSaving] = useState(false);
+  const [supplierActionError, setSupplierActionError] = useState<string | null>(null);
+  const [supplierActionMessage, setSupplierActionMessage] = useState<string | null>(null);
   const [loadingItems, setLoadingItems] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -101,6 +121,7 @@ export default function PurchasingPage() {
     loadItems();
   }, []);
 
+
   const handleFormChange = (
     field: keyof PurchaseFormState,
     value: string,
@@ -131,6 +152,85 @@ export default function PurchasingPage() {
       prev.length === 1 ? prev : prev.filter((line) => line.id !== lineId),
     );
   };
+
+  const handleSupplierSelect = (supplierId: string) => {
+    setSelectedSupplierId(supplierId);
+    if (!supplierId) return;
+    const match = suppliers.find((supplier) => supplier.id === supplierId);
+    if (!match) return;
+    setForm((prev) => ({
+      ...prev,
+      vendorName: match.name ?? prev.vendorName,
+      supplierContact: match.contact ?? "",
+      supplierAddress: match.address ?? "",
+    }));
+  };
+
+  const refreshSuppliers = async () => {
+    try {
+      const ref = collection(db, "suppliers");
+      const q = query(ref, orderBy("name"));
+      const snapshot = await getDocs(q);
+      const opts: SupplierOption[] = snapshot.docs.map((doc) => {
+        const data = doc.data() as any;
+        return {
+          id: doc.id,
+          name: data.name ?? "Unnamed supplier",
+          contact: data.contact ?? data.contactInfo ?? null,
+          address: data.address ?? null,
+        };
+      });
+      setSuppliers(opts);
+    } catch (err) {
+      console.error("Error refreshing suppliers", err);
+    }
+  };
+
+  const handleSaveSupplier = async () => {
+    setSupplierActionError(null);
+    setSupplierActionMessage(null);
+    if (!form.vendorName.trim()) {
+      setSupplierActionError("Enter a supplier / vendor name first.");
+      return;
+    }
+    setSupplierSaving(true);
+    try {
+      const now = Timestamp.now();
+      const payload = {
+        name: form.vendorName.trim(),
+        contact: form.supplierContact.trim() || null,
+        address: form.supplierAddress.trim() || null,
+        updatedAt: now,
+      };
+      if (selectedSupplierId) {
+        const ref = doc(db, "suppliers", selectedSupplierId);
+        await updateDoc(ref, payload);
+        setSupplierActionMessage("Supplier updated.");
+      } else {
+        const ref = await addDoc(collection(db, "suppliers"), {
+          ...payload,
+          createdAt: now,
+        });
+        setSelectedSupplierId(ref.id);
+        setSupplierActionMessage("Supplier saved for future purchases.");
+      }
+      await refreshSuppliers();
+    } catch (err: any) {
+      console.error("Error saving supplier", err);
+      setSupplierActionError(err?.message ?? "Unable to save supplier.");
+    } finally {
+      setSupplierSaving(false);
+    }
+  };
+
+  useEffect(() => {
+    const loadSuppliers = async () => {
+      setLoadingSuppliers(true);
+      await refreshSuppliers();
+      setLoadingSuppliers(false);
+    };
+    loadSuppliers();
+  }, []);
 
   const itemLookup = useMemo(() => {
     return new Map(items.map((item) => [item.id, item]));
@@ -173,6 +273,9 @@ export default function PurchasingPage() {
   const resetForm = () => {
     setForm({
       vendorName: "",
+      supplierContact: "",
+      supplierAddress: "",
+      shipTo: "",
       reference: "",
       purchaseDate: todayIso(),
       notes: "",
@@ -180,6 +283,7 @@ export default function PurchasingPage() {
     });
     setLines([emptyLine(1)]);
     setLineCounter(1);
+    setSelectedSupplierId("");
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -220,6 +324,10 @@ export default function PurchasingPage() {
 
       const purchaseRef = await addDoc(collection(db, "purchases"), {
         vendorName: form.vendorName.trim(),
+        supplierContact: form.supplierContact.trim() || null,
+        supplierAddress: form.supplierAddress.trim() || null,
+        shipTo: form.shipTo.trim() || null,
+        supplierId: selectedSupplierId || null,
         reference: form.reference.trim() || null,
         notes: form.notes.trim() || null,
         purchaseDate,
@@ -339,6 +447,12 @@ export default function PurchasingPage() {
           <Link href="/purchasing/history" className="ims-secondary-button">
             View purchase history
           </Link>
+          <Link
+            href="/purchasing/external-po"
+            className="ims-secondary-button"
+          >
+            Create external PO
+          </Link>
         </div>
       </div>
 
@@ -360,6 +474,34 @@ export default function PurchasingPage() {
           </p>
 
           <div className="ims-field">
+            <label className="ims-field-label" htmlFor="savedSupplier">
+              Saved supplier
+            </label>
+            <select
+              id="savedSupplier"
+              className="ims-field-input"
+              value={selectedSupplierId}
+              onChange={(e) => handleSupplierSelect(e.target.value)}
+              disabled={loadingSuppliers}
+            >
+              <option value="">
+                {loadingSuppliers
+                  ? "Loading suppliers…"
+                  : "Select saved supplier…"}
+              </option>
+              {suppliers.map((supplier) => (
+                <option key={supplier.id} value={supplier.id}>
+                  {supplier.name}
+                </option>
+              ))}
+            </select>
+            <p className="ims-field-help">
+              Selecting a saved supplier fills the fields below. Update any
+              details and click “Save supplier” to keep them in sync.
+            </p>
+          </div>
+
+          <div className="ims-field">
             <label className="ims-field-label" htmlFor="vendorName">
               Vendor / supplier<span className="ims-required">*</span>
             </label>
@@ -371,6 +513,77 @@ export default function PurchasingPage() {
               onChange={(e) => handleFormChange("vendorName", e.target.value)}
               placeholder="e.g. Ocean Components Ltd"
             />
+          </div>
+
+          <div className="ims-field">
+            <label className="ims-field-label" htmlFor="supplierContact">
+              Supplier contact info
+            </label>
+            <input
+              id="supplierContact"
+              type="text"
+              className="ims-field-input"
+              value={form.supplierContact}
+              onChange={(e) =>
+                handleFormChange("supplierContact", e.target.value)
+              }
+              placeholder="Email, phone or account manager"
+            />
+          </div>
+
+          <div className="ims-field">
+            <label className="ims-field-label" htmlFor="supplierAddress">
+              Supplier address
+            </label>
+            <textarea
+              id="supplierAddress"
+              className="ims-field-input ims-field-textarea"
+              rows={3}
+              value={form.supplierAddress}
+              onChange={(e) =>
+                handleFormChange("supplierAddress", e.target.value)
+              }
+              placeholder={"Supplier address\nCity\nPostcode"}
+            />
+          </div>
+
+          <div className="ims-field">
+            <label className="ims-field-label" htmlFor="shipTo">
+              Ship to / delivery location
+            </label>
+            <textarea
+              id="shipTo"
+              className="ims-field-input ims-field-textarea"
+              rows={2}
+              value={form.shipTo}
+              onChange={(e) => handleFormChange("shipTo", e.target.value)}
+              placeholder={"Warehouse name\nAddress"}
+            />
+          </div>
+
+          <div className="ims-field">
+            <button
+              type="button"
+              className="ims-secondary-button"
+              onClick={handleSaveSupplier}
+              disabled={supplierSaving}
+            >
+              {supplierSaving
+                ? "Saving supplier…"
+                : selectedSupplierId
+                  ? "Update saved supplier"
+                  : "Save supplier for reuse"}
+            </button>
+            {supplierActionError && (
+              <p className="ims-field-help" style={{ color: "#b91c1c" }}>
+                {supplierActionError}
+              </p>
+            )}
+            {supplierActionMessage && (
+              <p className="ims-field-help" style={{ color: "#065f46" }}>
+                {supplierActionMessage}
+              </p>
+            )}
           </div>
 
           <div className="ims-field-row">

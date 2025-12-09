@@ -13,7 +13,9 @@ import { db } from "@/lib/firebase";
 import {
   collection,
   getDocs,
+  getDoc,
   addDoc,
+  updateDoc,
   doc,
   query,
   orderBy,
@@ -21,6 +23,7 @@ import {
   writeBatch,
   increment,
 } from "firebase/firestore";
+import { createOrUpdateProductTracking } from "@/lib/productTracking";
 
 type ItemOption = {
   id: string;
@@ -48,6 +51,7 @@ type Project = {
   items: ProjectItemLine[];
   createdAt?: Timestamp;
   updatedAt?: Timestamp;
+  completedAt?: Timestamp | null;
 };
 
 type NewLineState = {
@@ -110,11 +114,11 @@ export default function ProjectsWipPage() {
       const projectsSnap = await getDocs(
         query(collection(db, "projects"), orderBy("createdAt", "desc")),
       );
-      const projRows: Project[] = projectsSnap.docs.map((d) => {
-        const data = d.data() as any;
-        return {
-          id: d.id,
-          name: data.name ?? "",
+        const projRows: Project[] = projectsSnap.docs.map((d) => {
+          const data = d.data() as any;
+          return {
+            id: d.id,
+            name: data.name ?? "",
           status:
             (data.status as ProjectStatus) ??
             "reserved",
@@ -138,6 +142,7 @@ export default function ProjectsWipPage() {
             : [],
           createdAt: data.createdAt,
           updatedAt: data.updatedAt,
+          completedAt: data.completedAt ?? null,
         };
       });
       setProjects(projRows);
@@ -152,6 +157,24 @@ export default function ProjectsWipPage() {
   useEffect(() => {
     loadData();
   }, []);
+
+  const createProductTrackingRecords = async (
+    project: Project,
+    completedAt: Timestamp,
+  ) => {
+    await Promise.all(
+      project.items.map(async (line) => {
+        if (!line.itemId) return;
+        await createOrUpdateProductTracking(
+          project,
+          line.itemId,
+          line.itemName,
+          line.qty || 0,
+          completedAt,
+        );
+      }),
+    );
+  };
 
   const handleAddLine = () => {
     setNewLines((prev) => [
@@ -356,13 +379,21 @@ export default function ProjectsWipPage() {
     try {
       const now = Timestamp.now();
       const batch = writeBatch(db);
+      const shouldTrackCompletion =
+        targetStatus === "complete" && fromStatus !== "complete";
 
       // Update project status
       const projRef = doc(db, "projects", project.id);
-      batch.update(projRef, {
+      const projectUpdates: any = {
         status: targetStatus,
         updatedAt: now,
-      });
+      };
+      if (targetStatus === "complete") {
+        projectUpdates.completedAt = now;
+      } else if (fromStatus === "complete") {
+        projectUpdates.completedAt = null;
+      }
+      batch.update(projRef, projectUpdates);
 
       const computeDeltas = (qty: number) => {
         let reservedDelta = 0;
@@ -463,6 +494,9 @@ export default function ProjectsWipPage() {
       });
 
       await batch.commit();
+      if (shouldTrackCompletion) {
+        await createProductTrackingRecords(project, now);
+      }
       setMessage("Project status changed and stock buckets updated.");
       await loadData();
     } catch (err: any) {

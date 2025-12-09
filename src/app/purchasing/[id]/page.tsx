@@ -18,6 +18,7 @@ import {
   writeBatch,
   increment,
 } from "firebase/firestore";
+import { useAuth } from "@/app/_components/AuthProvider";
 
 type PurchaseLine = {
   itemId?: string | null;
@@ -41,11 +42,16 @@ type PurchaseNote = {
   id: string;
   body: string;
   createdAt?: Timestamp | null;
+  createdByEmail?: string | null;
 };
 
 type PurchaseRecord = {
   id: string;
   vendorName: string;
+  supplierContact?: string | null;
+  supplierAddress?: string | null;
+  shipTo?: string | null;
+  supplierId?: string | null;
   reference?: string | null;
   purchaseDate?: Timestamp | null;
   totalAmount?: number | null;
@@ -114,6 +120,7 @@ const readFileAsDataUrl = (file: File) => {
 export default function PurchaseDetailPage() {
   const params = useParams<{ id: string }>();
   const purchaseId = params?.id;
+  const { user } = useAuth();
 
   const [purchase, setPurchase] = useState<PurchaseRecord | null>(null);
   const [loading, setLoading] = useState(true);
@@ -150,6 +157,10 @@ export default function PurchaseDetailPage() {
         setPurchase({
           id: snap.id,
           vendorName: data.vendorName ?? "Unknown vendor",
+          supplierContact: data.supplierContact ?? null,
+          supplierAddress: data.supplierAddress ?? null,
+          shipTo: data.shipTo ?? null,
+          supplierId: data.supplierId ?? null,
           reference: data.reference ?? null,
           purchaseDate: data.purchaseDate ?? data.createdAt ?? null,
           totalAmount:
@@ -163,7 +174,12 @@ export default function PurchaseDetailPage() {
             ? data.attachments
             : [],
           internalNotes: Array.isArray(data.internalNotes)
-            ? data.internalNotes
+            ? data.internalNotes.map((note: any) => ({
+                id: note.id ?? `note-${Math.random()}`,
+                body: note.body ?? "",
+                createdAt: note.createdAt ?? null,
+                createdByEmail: note.createdByEmail ?? note.author ?? "unknown",
+              }))
             : [],
         });
       } catch (err) {
@@ -412,6 +428,7 @@ export default function PurchaseDetailPage() {
       id: `${purchase.id}-note-${now.toMillis()}`,
       body: trimmed,
       createdAt: now,
+      createdByEmail: user?.email ?? "unknown",
     };
     const nextNotes = [note, ...purchase.internalNotes];
     try {
@@ -444,6 +461,16 @@ export default function PurchaseDetailPage() {
           <Link href="/purchasing/history" className="ims-secondary-button">
             ← Back to history
           </Link>
+          <Link
+            href={
+              purchaseId
+                ? `/purchasing/external-po?purchaseId=${purchaseId}`
+                : "/purchasing/external-po"
+            }
+            className="ims-secondary-button"
+          >
+            Create external PO
+          </Link>
           <Link href="/purchasing" className="ims-primary-button">
             + Log new purchase
           </Link>
@@ -471,6 +498,38 @@ export default function PurchaseDetailPage() {
               Logged on {formatDate(purchase.purchaseDate)}{" "}
               {purchase.reference ? `• Ref ${purchase.reference}` : ""}
             </p>
+
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+                gap: "1rem",
+                marginTop: "1rem",
+              }}
+            >
+              <div>
+                <p className="ims-field-label">Supplier contact</p>
+                <p style={{ margin: 0 }}>
+                  {purchase.supplierContact?.trim()
+                    ? purchase.supplierContact
+                    : "—"}
+                </p>
+              </div>
+              <div>
+                <p className="ims-field-label">Supplier address</p>
+                <p style={{ margin: 0, whiteSpace: "pre-line" }}>
+                  {purchase.supplierAddress?.trim()
+                    ? purchase.supplierAddress
+                    : "—"}
+                </p>
+              </div>
+              <div>
+                <p className="ims-field-label">Ship to / delivery</p>
+                <p style={{ margin: 0, whiteSpace: "pre-line" }}>
+                  {purchase.shipTo?.trim() ? purchase.shipTo : "—"}
+                </p>
+              </div>
+            </div>
 
             <div
               className="ims-field"
@@ -812,7 +871,10 @@ export default function PurchaseDetailPage() {
                         marginBottom: "0.35rem",
                       }}
                     >
-                      Added {formatDate(note.createdAt)}
+                      Added {formatDate(note.createdAt)}{" "}
+                      {note.createdByEmail
+                        ? `• ${note.createdByEmail}`
+                        : ""}
                     </div>
                     <div>{note.body}</div>
                   </li>

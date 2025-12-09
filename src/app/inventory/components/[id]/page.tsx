@@ -26,6 +26,7 @@ type Item = {
   name: string;
   description?: string | null;
   itemType?: string;
+  category?: string | null;
   unitOfMeasure?: string;
   standardCost?: number;
   standardCostCurrency?: string;
@@ -52,6 +53,7 @@ type FormState = {
   name: string;
   description: string;
   itemType: string;
+  category: string;
   unitOfMeasure: string;
   standardCost: string;
   standardCostCurrency: string;
@@ -75,6 +77,15 @@ type LinkedItem = {
   name: string;
   itemType?: string;
 };
+
+const CATEGORY_OPTIONS = [
+  "Unit Extra",
+  "Data",
+  "Sensor",
+  "Support Services",
+  "Sensor Extra",
+  "Unit",
+];
 
 type LocationOption = {
   id: string;
@@ -231,6 +242,7 @@ export default function ProductDetailPage() {
           name: data.name ?? "",
           description: data.description ?? "",
           itemType: data.itemType ?? data.rawCsvItemType ?? "",
+          category: data.category ?? null,
           unitOfMeasure: data.unitOfMeasure ?? "",
           standardCost:
             typeof data.standardCost === "number"
@@ -279,6 +291,7 @@ export default function ProductDetailPage() {
           name: loaded.name,
           description: loaded.description ?? "",
           itemType: loaded.itemType ?? "component",
+          category: loaded.category ?? "",
           unitOfMeasure: loaded.unitOfMeasure ?? "",
           standardCost:
             loaded.standardCost != null ? String(loaded.standardCost) : "",
@@ -773,6 +786,7 @@ export default function ProductDetailPage() {
         description: form.description.trim() || null,
         itemType: form.itemType,
         unitOfMeasure: form.unitOfMeasure,
+        category: form.category || null,
         standardCost: form.standardCost ? Number(form.standardCost) : null,
         standardCostCurrency: form.standardCostCurrency,
         reorderLevel: form.reorderLevel ? Number(form.reorderLevel) : null,
@@ -806,6 +820,7 @@ export default function ProductDetailPage() {
               description: form.description.trim() || null,
               itemType: form.itemType,
               unitOfMeasure: form.unitOfMeasure,
+              category: form.category || null,
               standardCost: form.standardCost
                 ? Number(form.standardCost)
                 : undefined,
@@ -1007,6 +1022,31 @@ export default function ProductDetailPage() {
                     </select>
                   ) : (
                     <div>{item.itemType || "—"}</div>
+                  )}
+                </div>
+
+                <div className="ims-field">
+                  <label className="ims-field-label" htmlFor="category">
+                    Category
+                  </label>
+                  {isEditing ? (
+                    <select
+                      id="category"
+                      className="ims-field-input"
+                      value={form.category}
+                      onChange={(e) =>
+                        handleChange("category", e.target.value)
+                      }
+                    >
+                      <option value="">Select category…</option>
+                      {CATEGORY_OPTIONS.map((option) => (
+                        <option key={option} value={option}>
+                          {option}
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <div>{item.category || "—"}</div>
                   )}
                 </div>
 

@@ -5,6 +5,9 @@ import type { ReactNode } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { usePathname } from "next/navigation";
+import { signOut } from "firebase/auth";
+import { auth } from "@/lib/firebase";
+import { useAuth } from "./AuthProvider";
 
 type NavItem = {
   label: string;
@@ -16,6 +19,7 @@ const navItems: NavItem[] = [
   { label: "Inventory", href: "/inventory" },
   { label: "Purchasing", href: "/purchasing/history" },
   { label: "Projects", href: "/projects" },
+  { label: "Product Tracking", href: "/project-tracking" },
   { label: "Reporting", href: "/reporting" },
   { label: "Integrations", href: "/integrations" },
   { label: "Configurator (WiP)", href: "/configurator" },
@@ -24,6 +28,7 @@ const navItems: NavItem[] = [
 
 export default function ImsShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
+  const { user } = useAuth();
 
   const isActive = (href: string) => {
     if (href === "/") return pathname === "/";
@@ -71,8 +76,23 @@ export default function ImsShell({ children }: { children: ReactNode }) {
       {/* Main column */}
       <div className="ims-main">
         <header className="ims-header">
-          {/* Left spacer (no search bar) */}
-         
+          <div />
+          <div className="ims-header-actions">
+            {user && (
+              <>
+                <span style={{ fontSize: "0.85rem", color: "#4b5563" }}>
+                  {user.email}
+                </span>
+                <button
+                  type="button"
+                  className="ims-secondary-button"
+                  onClick={() => signOut(auth)}
+                >
+                  Sign out
+                </button>
+              </>
+            )}
+          </div>
         </header>
 
         {children}

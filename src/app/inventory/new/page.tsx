@@ -25,6 +25,7 @@ type FormState = {
   name: string;
   description: string;
   itemType: ItemType;
+  category: string;
   trackSerialNumber: boolean;
   unitOfMeasure: string;
 
@@ -50,6 +51,7 @@ const initialFormState: FormState = {
   name: "",
   description: "",
   itemType: "component",
+  category: "",
   trackSerialNumber: false,
   unitOfMeasure: "ea",
   primaryCategoryId: "",
@@ -149,6 +151,7 @@ export default function NewProductPage() {
         subCategoryIds: form.subCategoryIds,
 
         itemType: form.itemType,
+        category: form.category || null,
         trackSerialNumber: form.trackSerialNumber,
         unitOfMeasure: form.unitOfMeasure,
 
@@ -283,6 +286,24 @@ export default function NewProductPage() {
                 <option value="sub-assembly">Sub-assembly</option>
                 <option value="finished-good">Finished good</option>
                 <option value="service">Service</option>
+              </select>
+            </div>
+            <div className="ims-field">
+              <label className="ims-field-label" htmlFor="category">
+                Category
+              </label>
+              <select
+                id="category"
+                className="ims-field-input"
+                value={form.category}
+                onChange={(e) => handleChange("category", e.target.value)}
+              >
+                <option value="">Select category…</option>
+                {CATEGORY_OPTIONS.map((option) => (
+                  <option key={option} value={option}>
+                    {option}
+                  </option>
+                ))}
               </select>
             </div>
             <div className="ims-field">
@@ -555,3 +576,11 @@ export default function NewProductPage() {
     </div>
   );
 }
+const CATEGORY_OPTIONS = [
+  "Unit Extra",
+  "Data",
+  "Sensor",
+  "Support Services",
+  "Sensor Extra",
+  "Unit",
+];
