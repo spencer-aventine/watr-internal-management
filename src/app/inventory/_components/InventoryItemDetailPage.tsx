@@ -257,42 +257,49 @@ const parseRelationshipArray = (
 
 const parseInventoryHistory = (value: any): InventoryHistoryPoint[] => {
   if (!Array.isArray(value)) return [];
-  const entries = value
-    .map((entry, index) => {
-      if (!entry || typeof entry !== "object") return null;
-      const timestamp =
-        entry.timestamp ?? entry.at ?? entry.date ?? entry.recordedAt ?? null;
-      const at = toDate(timestamp);
-      if (!at) return null;
-      return {
-        id: String(entry.id ?? `movement-${index}`),
-        at,
-        bucket: entry.bucket ?? entry.type ?? entry.bucketName ?? null,
-        quantity:
-          parseNumber(entry.quantity ?? entry.onHand ?? entry.balance) ?? null,
-        delta: parseNumber(entry.delta ?? entry.change ?? entry.qtyChange),
-        reference: entry.reference ?? entry.source ?? entry.reason ?? null,
-        note: entry.note ?? entry.comment ?? null,
-        changeType: entry.changeType ?? entry.movementType ?? entry.kind ?? entry.reasonType ?? null,
-        fromBucket:
-          entry.fromBucket ??
-          entry.sourceBucket ??
-          entry.from ??
-          (typeof (entry.bucket ?? entry.bucketName) === "string" &&
-          String(entry.bucket ?? entry.bucketName).includes("→")
-            ? String(entry.bucket ?? entry.bucketName).split("→")[0].trim()
-            : null),
-        toBucket:
-          entry.toBucket ??
-          entry.destinationBucket ??
-          entry.to ??
-          (typeof (entry.bucket ?? entry.bucketName) === "string" &&
-          String(entry.bucket ?? entry.bucketName).includes("→")
-            ? String(entry.bucket ?? entry.bucketName).split("→")[1]?.trim() ?? null
-            : null),
-      };
-    })
-    .filter((entry): entry is InventoryHistoryPoint => Boolean(entry));
+  const entries: InventoryHistoryPoint[] = [];
+  value.forEach((entry, index) => {
+    if (!entry || typeof entry !== "object") return;
+    const timestamp =
+      entry.timestamp ?? entry.at ?? entry.date ?? entry.recordedAt ?? null;
+    const at = toDate(timestamp);
+    if (!at) return;
+    const bucketLabel = entry.bucket ?? entry.type ?? entry.bucketName ?? null;
+    const bucketLabelString =
+      typeof bucketLabel === "string" ? bucketLabel : null;
+    const derivedFrom =
+      entry.fromBucket ??
+      entry.sourceBucket ??
+      entry.from ??
+      (bucketLabelString && bucketLabelString.includes("→")
+        ? bucketLabelString.split("→")[0].trim()
+        : null);
+    const derivedTo =
+      entry.toBucket ??
+      entry.destinationBucket ??
+      entry.to ??
+      (bucketLabelString && bucketLabelString.includes("→")
+        ? bucketLabelString.split("→")[1]?.trim() ?? null
+        : null);
+    entries.push({
+      id: String(entry.id ?? `movement-${index}`),
+      at,
+      bucket: bucketLabel,
+      quantity:
+        parseNumber(entry.quantity ?? entry.onHand ?? entry.balance) ?? null,
+      delta: parseNumber(entry.delta ?? entry.change ?? entry.qtyChange),
+      reference: entry.reference ?? entry.source ?? entry.reason ?? null,
+      note: entry.note ?? entry.comment ?? null,
+      changeType:
+        entry.changeType ??
+        entry.movementType ??
+        entry.kind ??
+        entry.reasonType ??
+        null,
+      fromBucket: derivedFrom,
+      toBucket: derivedTo,
+    });
+  });
   return entries.sort((a, b) => b.at.getTime() - a.at.getTime());
 };
 
