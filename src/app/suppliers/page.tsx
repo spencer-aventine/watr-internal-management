@@ -189,7 +189,7 @@ export default function SuppliersPage() {
           <button
             type="button"
             className="ims-secondary-button"
-            onClick={loadSuppliers}
+            onClick={() => loadSuppliers()}
             disabled={loading}
           >
             {loading ? "Refreshing…" : "Refresh"}

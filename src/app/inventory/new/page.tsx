@@ -163,28 +163,25 @@ export default function NewProductPage() {
         const snap = await getDocs(
           query(collection(db, "items"), orderBy("name")),
         );
-        const rows: SensorExtraOption[] = snap.docs
-          .map((docSnap) => {
-            const data = docSnap.data() as any;
-            const type = normalizeItemType(
-              data.itemType ?? data.rawCsvItemType ?? data.category ?? "",
-            );
-            if (
-              type !== "sensor extra" &&
-              type !== "sensor extras" &&
-              type !== "sensorextra"
-            ) {
-              return null;
-            }
-            return {
-              id: docSnap.id,
-              name: data.name ?? data.sku ?? "Sensor extra",
-              sku: data.sku ?? data.shortCode ?? null,
-            };
-          })
-          .filter(
-            (option): option is SensorExtraOption => option !== null,
+        const rows: SensorExtraOption[] = [];
+        snap.docs.forEach((docSnap) => {
+          const data = docSnap.data() as any;
+          const type = normalizeItemType(
+            data.itemType ?? data.rawCsvItemType ?? data.category ?? "",
           );
+          if (
+            type !== "sensor extra" &&
+            type !== "sensor extras" &&
+            type !== "sensorextra"
+          ) {
+            return;
+          }
+          rows.push({
+            id: docSnap.id,
+            name: data.name ?? data.sku ?? "Sensor extra",
+            sku: data.sku ?? data.shortCode ?? null,
+          });
+        });
         setSensorExtraOptions(rows);
       } catch (err: any) {
         console.error("Error loading sensor extras", err);

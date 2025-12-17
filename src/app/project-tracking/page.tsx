@@ -78,6 +78,10 @@ export default function ProductTrackingPage() {
       const rows: ProductTrackingRecord[] = snapshot.docs.map((doc) => {
         const data = doc.data() as any;
         const replaceBy: Timestamp | null = data.replaceBy ?? null;
+        const trackingType: ProductTrackingRecord["trackingType"] =
+          data.trackingType === "usefulLife" || data.trackingType === "sensorExtra"
+            ? data.trackingType
+            : undefined;
         const now = Date.now();
         const daysRemaining =
           replaceBy instanceof Timestamp
@@ -103,7 +107,7 @@ export default function ProductTrackingPage() {
             typeof data.usefulLifeMonths === "number"
               ? data.usefulLifeMonths
               : null,
-          trackingType: (data.trackingType as ProductTrackingRecord["trackingType"]) ?? null,
+          trackingType,
           replacementFrequencyPerYear:
             typeof data.replacementFrequencyPerYear === "number"
               ? data.replacementFrequencyPerYear

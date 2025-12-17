@@ -30,6 +30,18 @@ type Project = {
   updatedAt?: Timestamp | null;
 };
 
+type SubAssemblyComponent = {
+  componentId: string;
+  name: string;
+  sku?: string | null;
+  quantityPerAssembly: number;
+};
+
+type SubAssemblyEntry = {
+  id: string;
+  components: SubAssemblyComponent[];
+};
+
 export default function ProjectDetailPage() {
   const params = useParams<{ id: string }>();
   const router = useRouter();
@@ -41,15 +53,7 @@ export default function ProjectDetailPage() {
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [subAssemblyComponents, setSubAssemblyComponents] = useState<
-    Record<
-      string,
-      {
-        componentId: string;
-        name: string;
-        sku?: string | null;
-        quantityPerAssembly: number;
-      }[]
-    >
+    Record<string, SubAssemblyComponent[]>
   >({});
   const [sensorExtrasBySensor, setSensorExtrasBySensor] = useState<
     Record<
@@ -127,7 +131,7 @@ export default function ProjectDetailPage() {
     let cancelled = false;
     const loadComponents = async () => {
       try {
-        const entries = await Promise.all(
+        const entries: Array<SubAssemblyEntry | null> = await Promise.all(
           uniqueIds.map(async (subAssemblyId) => {
             if (!subAssemblyId) return null;
             try {
@@ -135,7 +139,9 @@ export default function ProjectDetailPage() {
               const snap = await getDoc(ref);
               if (!snap.exists()) return { id: subAssemblyId, components: [] };
               const data = snap.data() as any;
-              const components = Array.isArray(data.components)
+              const components: SubAssemblyComponent[] = Array.isArray(
+                data.components,
+              )
                 ? data.components
                     .map((component: any) => {
                       const componentId =
@@ -180,7 +186,7 @@ export default function ProjectDetailPage() {
         if (cancelled) return;
         const componentIds = new Set<string>();
         entries.forEach((entry) => {
-          entry?.components?.forEach((component) => {
+          entry?.components?.forEach((component: SubAssemblyComponent) => {
             componentIds.add(component.componentId);
           });
         });
@@ -215,27 +221,21 @@ export default function ProjectDetailPage() {
             };
           });
         }
-        const map: Record<
-          string,
-          {
-            componentId: string;
-            name: string;
-            sku?: string | null;
-            quantityPerAssembly: number;
-          }[]
-        > = {};
+        const map: Record<string, SubAssemblyComponent[]> = {};
         entries.forEach((entry) => {
           if (!entry) return;
-          map[entry.id] = entry.components.map((component) => {
-            const override = directory[component.componentId];
-            return override
-              ? {
-                  ...component,
-                  name: override.name,
-                  sku: override.sku ?? component.sku,
-                }
-              : component;
-          });
+          map[entry.id] = entry.components.map(
+            (component: SubAssemblyComponent) => {
+              const override = directory[component.componentId];
+              return override
+                ? {
+                    ...component,
+                    name: override.name,
+                    sku: override.sku ?? component.sku,
+                  }
+                : component;
+            },
+          );
         });
         setSubAssemblyComponents(map);
       } catch (err) {

@@ -2769,7 +2769,9 @@ export default function InventoryItemDetailPage({
                 subtitle={section.subtitle}
                 items={section.items}
                 emptyLabel={section.emptyLabel}
-                fallbackType={section.fallbackType}
+                fallbackType={
+                  section.fallbackType as InventoryDetailType | undefined
+                }
               />
             ))}
           </div>

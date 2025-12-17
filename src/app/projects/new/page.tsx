@@ -167,7 +167,8 @@ export default function NewProjectPage() {
                     };
                   })
                   .filter(
-                    (entry): entry is SensorExtraRequirement => Boolean(entry),
+                    (entry: SensorExtraRequirement | null): entry is SensorExtraRequirement =>
+                      Boolean(entry),
                   )
               : undefined;
           return {

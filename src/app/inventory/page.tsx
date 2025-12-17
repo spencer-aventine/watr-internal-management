@@ -336,7 +336,7 @@ export default function InventoryPage() {
   };
 
   const applyColumnSelection = () => {
-    setVisibleColumns(draftColumns.length ? draftColumns : ["sku", "name"]);
+    setVisibleColumns(draftColumns.length ? draftColumns : ["shortCode", "name"]);
     setShowColumnMenu(false);
   };
 

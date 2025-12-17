@@ -57,9 +57,10 @@ export const createOrUpdateProductTracking = async (
 
   const replaceDate = completedAt.toDate();
   if (isSensorExtra) {
+    const frequencyPerYear = replacementFrequencyPerYear!;
     const intervalDays = Math.max(
       1,
-      Math.round(365 / replacementFrequencyPerYear),
+      Math.round(365 / frequencyPerYear),
     );
     replaceDate.setDate(replaceDate.getDate() + intervalDays);
   } else if (usefulLifeMonths) {
