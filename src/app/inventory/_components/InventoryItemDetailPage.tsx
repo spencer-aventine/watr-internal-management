@@ -2426,7 +2426,7 @@ export default function InventoryItemDetailPage({
         snap.forEach((purchaseDoc) => {
           const data = purchaseDoc.data() as any;
           const lineItems = Array.isArray(data.lineItems) ? data.lineItems : [];
-          const qtyForItem = lineItems.reduce((sum, line) => {
+          const qtyForItem = lineItems.reduce((sum: number, line: any) => {
             if (line?.itemId !== item.id) return sum;
             const qty = Number(line.quantity);
             return Number.isFinite(qty) && qty > 0 ? sum + qty : sum;
