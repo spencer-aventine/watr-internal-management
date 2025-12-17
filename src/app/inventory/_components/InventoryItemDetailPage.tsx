@@ -202,55 +202,57 @@ const parseRelationshipArray = (
   fallbackType?: InventoryDetailType,
 ): RelationshipEntry[] => {
   if (!Array.isArray(value)) return [];
-  return value
-    .map((entry, index) => {
-      if (!entry || typeof entry !== "object") return null;
-      const id =
-        (entry.itemId ??
-          entry.componentId ??
-          entry.subAssemblyId ??
-          entry.subassemblyId ??
-          entry.sensorId ??
-          entry.sensorExtraId ??
-          entry.id ??
-          entry.referenceId ??
-          entry.code ??
-          "") || `rel-${index}`;
-      const quantity = parseNumber(entry.quantity ?? entry.qty);
-      const unitPrice = parseNumber(
-        entry.unitPrice ?? entry.price ?? entry.cost ?? entry.standardCost,
-      );
-      const total =
-        parseNumber(entry.lineTotal ?? entry.total) ??
-        (typeof quantity === "number" && typeof unitPrice === "number"
-          ? quantity * unitPrice
-          : null);
-      return {
-        id: String(id),
-        name:
-          entry.name ??
-          entry.itemName ??
-          entry.componentName ??
-          entry.subAssemblyName ??
-          entry.sku ??
-          "Unnamed item",
-        sku: entry.sku ?? entry.code ?? entry.partCode ?? null,
-        quantity: quantity ?? null,
-        unitPrice: unitPrice ?? null,
-        total: total ?? null,
-        mandatory: Boolean(
-          entry.mandatory ??
-            entry.required ??
-            entry.isMandatory ??
-            entry.mandatorySensor,
-        ),
-        note: entry.note ?? entry.notes ?? null,
-        type: (entry.type ?? entry.itemType ?? fallbackType ?? null) as
-          | InventoryDetailType
-          | null,
-      };
-    })
-    .filter((entry): entry is RelationshipEntry => Boolean(entry));
+  const relationships: RelationshipEntry[] = [];
+  value.forEach((entry, index) => {
+    if (!entry || typeof entry !== "object") {
+      return;
+    }
+    const id =
+      (entry.itemId ??
+        entry.componentId ??
+        entry.subAssemblyId ??
+        entry.subassemblyId ??
+        entry.sensorId ??
+        entry.sensorExtraId ??
+        entry.id ??
+        entry.referenceId ??
+        entry.code ??
+        "") || `rel-${index}`;
+    const quantity = parseNumber(entry.quantity ?? entry.qty);
+    const unitPrice = parseNumber(
+      entry.unitPrice ?? entry.price ?? entry.cost ?? entry.standardCost,
+    );
+    const total =
+      parseNumber(entry.lineTotal ?? entry.total) ??
+      (typeof quantity === "number" && typeof unitPrice === "number"
+        ? quantity * unitPrice
+        : null);
+    relationships.push({
+      id: String(id),
+      name:
+        entry.name ??
+        entry.itemName ??
+        entry.componentName ??
+        entry.subAssemblyName ??
+        entry.sku ??
+        "Unnamed item",
+      sku: entry.sku ?? entry.code ?? entry.partCode ?? null,
+      quantity: quantity ?? null,
+      unitPrice: unitPrice ?? null,
+      total: total ?? null,
+      mandatory: Boolean(
+        entry.mandatory ??
+          entry.required ??
+          entry.isMandatory ??
+          entry.mandatorySensor,
+      ),
+      note: entry.note ?? entry.notes ?? null,
+      type: (entry.type ?? entry.itemType ?? fallbackType ?? null) as
+        | InventoryDetailType
+        | null,
+    });
+  });
+  return relationships;
 };
 
 const parseInventoryHistory = (value: any): InventoryHistoryPoint[] => {
