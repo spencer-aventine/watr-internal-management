@@ -5,13 +5,18 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { db } from "@/lib/firebase";
 import { collection, getDocs, query, orderBy } from "firebase/firestore";
-import { getInventoryDetailPath } from "@/lib/inventoryPaths";
+import {
+  getInventoryDetailPath,
+  normalizeItemType,
+  type InventoryDetailType,
+} from "@/lib/inventoryPaths";
 
 type DashboardItem = {
   id: string;
   sku: string;
   name: string;
   itemType?: string;
+  category?: string | null;
   salesPrice?: number;
   standardCost?: number;
   inventoryQty?: number | null;
@@ -23,6 +28,47 @@ type DashboardItem = {
 };
 
 type ActiveView = "total" | "low" | "value" | "locations";
+
+const detailTypeLabels: Record<InventoryDetailType, string> = {
+  products: "Product",
+  subAssemblies: "Sub-assembly",
+  components: "Component",
+  sensors: "Sensor",
+  sensorExtras: "Sensor extra",
+};
+
+const deriveDetailType = (item: DashboardItem): InventoryDetailType => {
+  const normalizedType = normalizeItemType(item.itemType);
+  const fallback = normalizeItemType(item.category);
+  const combined = normalizedType || fallback;
+
+  if (
+    combined === "product" ||
+    combined === "products" ||
+    combined === "unit"
+  ) {
+    return "products";
+  }
+
+  if (
+    combined === "sub assembly" ||
+    combined === "sub assemblies" ||
+    combined === "subassembly" ||
+    combined === "unit extra"
+  ) {
+    return "subAssemblies";
+  }
+
+  if (combined === "sensor extra" || combined === "sensor extras") {
+    return "sensorExtras";
+  }
+
+  if (combined === "sensor" || combined === "sensors" || combined === "data") {
+    return "sensors";
+  }
+
+  return "components";
+};
 
 export default function HomePage() {
   const [items, setItems] = useState<DashboardItem[]>([]);
@@ -44,6 +90,7 @@ export default function HomePage() {
             id: doc.id,
             sku: data.sku ?? "",
             name: data.name ?? "",
+            category: data.category ?? null,
             salesPrice:
               typeof data.salesPrice === "number" ? data.salesPrice : undefined,
             standardCost:
@@ -273,7 +320,8 @@ export default function HomePage() {
               <thead>
                 {activeView === "total" && (
                   <tr>
-                    <th>Product</th>
+                    <th>Name</th>
+                    <th>Type</th>
                     <th>SKU</th>
                     <th>Inventory</th>
                     <th>Reserved</th>
@@ -284,7 +332,8 @@ export default function HomePage() {
 
                 {activeView === "low" && (
                   <tr>
-                    <th>Product</th>
+                    <th>Name</th>
+                    <th>Type</th>
                     <th>SKU</th>
                     <th>Inventory</th>
                     <th>Reserved</th>
@@ -295,7 +344,8 @@ export default function HomePage() {
 
                 {activeView === "value" && (
                   <tr>
-                    <th>Product</th>
+                    <th>Name</th>
+                    <th>Type</th>
                     <th>SKU</th>
                     <th>Inventory</th>
                     <th>Reserved</th>
@@ -308,7 +358,8 @@ export default function HomePage() {
 
                 {activeView === "locations" && (
                   <tr>
-                    <th>Product</th>
+                    <th>Name</th>
+                    <th>Type</th>
                     <th>SKU</th>
                     <th>Location</th>
                     <th>Inventory</th>
@@ -327,18 +378,26 @@ export default function HomePage() {
                   const res = item.reservedQty ?? 0;
                   const wip = item.wipQty ?? 0;
                   const comp = item.completedQty ?? 0;
+                  const detailType = deriveDetailType(item);
+                  const detailLabel = detailTypeLabels[detailType];
+                  const detailHref = getInventoryDetailPath(
+                    item.id,
+                    detailType,
+                    detailType,
+                  );
 
                   if (activeView === "total" || activeView === "low") {
                     return (
                       <tr key={item.id}>
                         <td>
                           <Link
-                            href={getInventoryDetailPath(item.id, item.itemType)}
+                            href={detailHref}
                             className="ims-table-link"
                           >
                             {item.name}
                           </Link>
                         </td>
+                        <td>{detailLabel}</td>
                         <td>{item.sku}</td>
                         <td>{inv}</td>
                         <td>{res}</td>
@@ -348,17 +407,18 @@ export default function HomePage() {
                     );
                   }
 
-                  if (activeView === "value") {
+                if (activeView === "value") {
                     return (
                       <tr key={item.id}>
                         <td>
                           <Link
-                            href={getInventoryDetailPath(item.id, item.itemType)}
+                            href={detailHref}
                             className="ims-table-link"
                           >
                             {item.name}
                           </Link>
                         </td>
+                        <td>{detailLabel}</td>
                         <td>{item.sku}</td>
                         <td>{inv}</td>
                         <td>{res}</td>
@@ -381,12 +441,13 @@ export default function HomePage() {
                     <tr key={item.id}>
                       <td>
                         <Link
-                          href={getInventoryDetailPath(item.id, item.itemType)}
+                          href={detailHref}
                           className="ims-table-link"
                         >
                           {item.name}
                         </Link>
                       </td>
+                      <td>{detailLabel}</td>
                       <td>{item.sku}</td>
                       <td>{item.location || "—"}</td>
                       <td>{inv}</td>

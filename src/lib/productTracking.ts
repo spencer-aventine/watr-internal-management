@@ -13,6 +13,13 @@ import {
   writeBatch,
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
+import { normalizeItemType } from "@/lib/inventoryPaths";
+
+const parseNumber = (value: any): number | null => {
+  if (value == null) return null;
+  const num = Number(value);
+  return Number.isFinite(num) ? num : null;
+};
 
 export const createOrUpdateProductTracking = async (
   project: { id: string; name: string },
@@ -20,20 +27,44 @@ export const createOrUpdateProductTracking = async (
   itemName: string,
   quantity: number,
   completedAt: Timestamp,
+  itemCategory?: string,
 ) => {
   const itemSnap = await getDoc(doc(db, "items", itemId));
   if (!itemSnap.exists()) return;
   const data = itemSnap.data() as any;
+  const normalizedType = normalizeItemType(
+    itemCategory ?? data.itemType ?? data.rawCsvItemType ?? data.category ?? "",
+  );
+  const isSensorExtra =
+    normalizedType === "sensor extra" || normalizedType === "sensor extras";
+
   const usefulLifeMonths =
-    typeof data.usefulLifeMonths === "number"
-      ? data.usefulLifeMonths
-      : Number(data.usefulLifeMonths);
-  if (!usefulLifeMonths || usefulLifeMonths <= 0) {
-    return;
+    parseNumber(data.usefulLifeMonths ?? data.usefulLifeMonths) ?? null;
+
+  const replacementFrequencyPerYear =
+    parseNumber(data.annualReplacementFrequency ?? data.replacementFrequencyPerYear) ??
+    null;
+
+  if (!isSensorExtra) {
+    if (!usefulLifeMonths || usefulLifeMonths <= 0) {
+      return;
+    }
+  } else {
+    if (!replacementFrequencyPerYear || replacementFrequencyPerYear <= 0) {
+      return;
+    }
   }
 
   const replaceDate = completedAt.toDate();
-  replaceDate.setMonth(replaceDate.getMonth() + usefulLifeMonths);
+  if (isSensorExtra) {
+    const intervalDays = Math.max(
+      1,
+      Math.round(365 / replacementFrequencyPerYear),
+    );
+    replaceDate.setDate(replaceDate.getDate() + intervalDays);
+  } else if (usefulLifeMonths) {
+    replaceDate.setMonth(replaceDate.getMonth() + usefulLifeMonths);
+  }
 
   const trackingRef = collection(db, "productTracking");
   const existing = await getDocs(
@@ -50,13 +81,18 @@ export const createOrUpdateProductTracking = async (
     projectName: project.name,
     itemId,
     itemName,
-    itemType: data.itemType ?? data.rawCsvItemType ?? null,
+    itemType: normalizedType,
     quantity,
-    usefulLifeMonths,
+    usefulLifeMonths: isSensorExtra ? null : usefulLifeMonths,
+    replacementFrequencyPerYear: isSensorExtra
+      ? replacementFrequencyPerYear
+      : null,
+    trackingType: isSensorExtra ? "sensorExtra" : "usefulLife",
     completedAt,
     replaceBy: Timestamp.fromDate(replaceDate),
     updatedAt: completedAt,
     replenished: false,
+    lastReplenishedAt: null,
   };
 
   if (existing.empty) {
@@ -70,7 +106,10 @@ export const createOrUpdateProductTracking = async (
   }
 };
 
-export const replenishTrackedProduct = async (recordId: string) => {
+export const replenishTrackedProduct = async (
+  recordId: string,
+  nextReplaceDate: Timestamp,
+) => {
   const recordRef = doc(db, "productTracking", recordId);
   const recordSnap = await getDoc(recordRef);
   if (!recordSnap.exists()) {
@@ -92,13 +131,12 @@ export const replenishTrackedProduct = async (recordId: string) => {
   }
 
   const now = Timestamp.now();
-  const nextReplace = now.toDate();
-  nextReplace.setMonth(nextReplace.getMonth() + usefulLifeMonths);
 
   const batch = writeBatch(db);
   batch.update(recordRef, {
     replenished: true,
     replenishedAt: now,
+    lastReplenishedAt: now,
   });
 
   const itemRef = doc(db, "items", record.itemId);
@@ -117,11 +155,14 @@ export const replenishTrackedProduct = async (recordId: string) => {
     itemType: record.itemType ?? null,
     quantity: record.quantity || 0,
     usefulLifeMonths,
+    replacementFrequencyPerYear: record.replacementFrequencyPerYear ?? null,
+    trackingType: record.trackingType ?? "usefulLife",
     completedAt: now,
-    replaceBy: Timestamp.fromDate(nextReplace),
+    replaceBy: nextReplaceDate,
     createdAt: now,
     updatedAt: now,
     replenished: false,
     notes: [],
+    lastReplenishedAt: null,
   });
 };

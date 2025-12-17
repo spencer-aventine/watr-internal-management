@@ -17,18 +17,22 @@ type NavItem = {
 const navItems: NavItem[] = [
   { label: "Dashboard", href: "/" },
   { label: "Inventory", href: "/inventory" },
+  { label: "Suppliers", href: "/suppliers" },
   { label: "Purchasing", href: "/purchasing/history" },
   { label: "Projects", href: "/projects" },
   { label: "Product Tracking", href: "/project-tracking" },
-  { label: "Reporting", href: "/reporting" },
-  { label: "Integrations", href: "/integrations" },
+  { label: "Reporting (WiP)", href: "/reporting" },
+  { label: "Integrations (WiP)", href: "/integrations" },
   { label: "Configurator (WiP)", href: "/configurator" },
   { label: "Admin", href: "/admin" },
 ];
 
 export default function ImsShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
-  const { user } = useAuth();
+  const { user, isAdmin } = useAuth();
+  const filteredNavItems = navItems.filter(
+    (item) => item.href !== "/admin" || isAdmin,
+  );
 
   const isActive = (href: string) => {
     if (href === "/") return pathname === "/";
@@ -56,7 +60,7 @@ export default function ImsShell({ children }: { children: ReactNode }) {
         </div>
 
         <nav className="ims-sidebar-nav">
-          {navItems.map((item) => (
+          {filteredNavItems.map((item) => (
             <Link
               key={item.href}
               href={item.href}

@@ -4,7 +4,14 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { db } from "@/lib/firebase";
-import { doc, getDoc } from "firebase/firestore";
+import {
+  collection,
+  doc,
+  getDoc,
+  getDocs,
+  orderBy,
+  query,
+} from "firebase/firestore";
 
 type PoFormState = {
   issuerName: string;
@@ -107,6 +114,18 @@ export default function ExternalPurchaseOrderPage() {
     id: string;
     vendorName: string;
   } | null>(null);
+  const [supplierOptions, setSupplierOptions] = useState<
+    {
+      id: string;
+      name: string;
+      contactName: string;
+      email: string;
+      phone: string;
+      address: string;
+    }[]
+  >([]);
+  const [loadingSuppliers, setLoadingSuppliers] = useState(true);
+  const [supplierId, setSupplierId] = useState<string>("");
 
   const handleFormChange = (field: keyof PoFormState, value: string) => {
     setForm((prev) => ({ ...prev, [field]: value }));
@@ -241,6 +260,50 @@ export default function ExternalPurchaseOrderPage() {
     loadPurchase();
   }, [purchaseId]);
 
+  useEffect(() => {
+    const loadSuppliers = async () => {
+      setLoadingSuppliers(true);
+      try {
+        const snap = await getDocs(
+          query(collection(db, "suppliers"), orderBy("name")),
+        );
+        const rows = snap.docs.map((docSnap) => {
+          const data = docSnap.data() as any;
+          return {
+            id: docSnap.id,
+            name: data.name ?? "Unnamed supplier",
+            contactName: data.contactName ?? "",
+            email: data.email ?? "",
+            phone: data.phone ?? "",
+            address: data.address ?? "",
+          };
+        });
+        setSupplierOptions(rows);
+      } catch (err) {
+        console.error("Error loading suppliers for PO", err);
+      } finally {
+        setLoadingSuppliers(false);
+      }
+    };
+
+    loadSuppliers();
+  }, []);
+
+  const applySupplierDetails = (supplierId: string) => {
+    setSupplierId(supplierId);
+    const supplier = supplierOptions.find((option) => option.id === supplierId);
+    if (!supplier) return;
+    const contactLine = [supplier.contactName, supplier.email, supplier.phone]
+      .filter(Boolean)
+      .join(" · ");
+    setForm((prev) => ({
+      ...prev,
+      supplierName: supplier.name,
+      supplierContact: contactLine,
+      supplierAddress: supplier.address,
+    }));
+  };
+
   return (
     <>
       <main className="ims-content external-po-page">
@@ -372,6 +435,31 @@ export default function ExternalPurchaseOrderPage() {
                     }
                   />
                 </div>
+              </div>
+
+              <div className="ims-field">
+                <label className="ims-field-label" htmlFor="supplierPreset">
+                  Choose saved supplier
+                </label>
+                <select
+                  id="supplierPreset"
+                  className="ims-field-input"
+                  value={supplierId}
+                  onChange={(e) => applySupplierDetails(e.target.value)}
+                  disabled={loadingSuppliers || supplierOptions.length === 0}
+                >
+                  <option value="">Select supplier…</option>
+                  {supplierOptions.map((supplier) => (
+                    <option key={supplier.id} value={supplier.id}>
+                      {supplier.name}
+                    </option>
+                  ))}
+                </select>
+                {!loadingSuppliers && supplierOptions.length === 0 && (
+                  <p className="ims-field-help">
+                    No suppliers available. Add suppliers from the Suppliers tab.
+                  </p>
+                )}
               </div>
 
               <div className="ims-field">

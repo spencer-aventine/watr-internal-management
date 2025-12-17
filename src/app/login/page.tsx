@@ -6,7 +6,8 @@ import {
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
 } from "firebase/auth";
-import { auth } from "@/lib/firebase";
+import { doc, getDoc, setDoc, Timestamp } from "firebase/firestore";
+import { auth, db } from "@/lib/firebase";
 import { useAuth } from "../_components/AuthProvider";
 
 export default function LoginPage() {
@@ -25,6 +26,28 @@ export default function LoginPage() {
     }
   }, [user, router]);
 
+  const ensureUserProfile = async (uid: string, emailAddress: string) => {
+    const profileRef = doc(db, "users", uid);
+    const profileSnap = await getDoc(profileRef);
+    if (!profileSnap.exists()) {
+      await setDoc(profileRef, {
+        email: emailAddress,
+        accountStatus: "viewOnly",
+        createdAt: Timestamp.now(),
+        updatedAt: Timestamp.now(),
+      });
+    } else if (!profileSnap.data()?.email) {
+      await setDoc(
+        profileRef,
+        {
+          email: emailAddress,
+          updatedAt: Timestamp.now(),
+        },
+        { merge: true },
+      );
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
@@ -36,9 +59,25 @@ export default function LoginPage() {
           setLoading(false);
           return;
         }
-        await createUserWithEmailAndPassword(auth, email.trim(), password);
+        const credential = await createUserWithEmailAndPassword(
+          auth,
+          email.trim(),
+          password,
+        );
+        const createdUser = credential.user;
+        if (createdUser) {
+          await ensureUserProfile(createdUser.uid, createdUser.email ?? email.trim());
+        }
       } else {
-        await signInWithEmailAndPassword(auth, email.trim(), password);
+        const credential = await signInWithEmailAndPassword(
+          auth,
+          email.trim(),
+          password,
+        );
+        const signedInUser = credential.user;
+        if (signedInUser) {
+          await ensureUserProfile(signedInUser.uid, signedInUser.email ?? email.trim());
+        }
       }
       router.replace("/");
     } catch (err: any) {

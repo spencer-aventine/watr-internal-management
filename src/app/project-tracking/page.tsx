@@ -1,10 +1,11 @@
 // src/app/project-tracking/page.tsx
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { db } from "@/lib/firebase";
 import { getInventoryDetailPath } from "@/lib/inventoryPaths";
+import { PROJECT_ITEM_LABELS } from "@/app/projects/_projectItemUtils";
 import {
   collection,
   getDocs,
@@ -21,14 +22,18 @@ type ProductTrackingRecord = {
   itemId: string;
   itemName: string;
   itemType?: string | null;
+  itemCategory?: string | null;
   quantity: number;
-  usefulLifeMonths: number;
+  usefulLifeMonths: number | null;
+  trackingType?: "usefulLife" | "sensorExtra";
+  replacementFrequencyPerYear?: number | null;
   completedAt?: Timestamp | null;
   replaceBy?: Timestamp | null;
   daysRemaining: number | null;
   status: "ok" | "warning" | "overdue" | "replenished";
   replenished?: boolean;
   replenishedAt?: Timestamp | null;
+  lastReplenishedAt?: Timestamp | null;
 };
 
 const formatDate = (value?: Timestamp | null) => {
@@ -44,10 +49,15 @@ const formatDate = (value?: Timestamp | null) => {
   }
 };
 
-const formatDuration = (months: number) => {
-  if (!Number.isFinite(months) || months <= 0) return "—";
+const formatDuration = (months?: number | null) => {
+  if (months == null || !Number.isFinite(months) || months <= 0) return "—";
   if (months === 1) return "1 month";
   return `${months} months`;
+};
+
+const formatNumber = (value?: number | null) => {
+  if (value == null || Number.isNaN(value)) return "—";
+  return new Intl.NumberFormat().format(value);
 };
 
 export default function ProductTrackingPage() {
@@ -55,60 +65,70 @@ export default function ProductTrackingPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [actionMessage, setActionMessage] = useState<string | null>(null);
   const [processingId, setProcessingId] = useState<string | null>(null);
 
-  useEffect(() => {
-    const load = async () => {
-      setLoading(true);
-      setError(null);
-      try {
-        const ref = collection(db, "productTracking");
-        const q = query(ref, orderBy("replaceBy", "asc"));
-        const snapshot = await getDocs(q);
-        const rows: ProductTrackingRecord[] = snapshot.docs.map((doc) => {
-          const data = doc.data() as any;
-          const replaceBy: Timestamp | null = data.replaceBy ?? null;
-          const now = Date.now();
-          const daysRemaining =
-            replaceBy instanceof Timestamp
-              ? Math.ceil(
-                  (replaceBy.toMillis() - now) / (1000 * 60 * 60 * 24),
-                )
-              : null;
-          let status: "ok" | "warning" | "overdue" = "ok";
-          if (daysRemaining != null) {
-            if (daysRemaining <= 0) status = "overdue";
-            else if (daysRemaining <= 30) status = "warning";
-          }
-          return {
-            id: doc.id,
-            projectId: data.projectId ?? "",
-            projectName: data.projectName ?? "Unnamed project",
-            itemId: data.itemId ?? "",
-            itemName: data.itemName ?? "Unknown item",
-            itemType: data.itemType ?? null,
-            quantity: typeof data.quantity === "number" ? data.quantity : 0,
-            usefulLifeMonths:
-              typeof data.usefulLifeMonths === "number"
-                ? data.usefulLifeMonths
-                : 0,
-            completedAt: data.completedAt ?? null,
-            replaceBy,
-            daysRemaining,
-            status,
-          };
-        });
-        setRecords(rows);
-      } catch (err: any) {
-        console.error("Error loading product tracking", err);
-        setError(err?.message ?? "Unable to load product tracking.");
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    load();
+  const fetchRecords = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const ref = collection(db, "productTracking");
+      const q = query(ref, orderBy("replaceBy", "asc"));
+      const snapshot = await getDocs(q);
+      const rows: ProductTrackingRecord[] = snapshot.docs.map((doc) => {
+        const data = doc.data() as any;
+        const replaceBy: Timestamp | null = data.replaceBy ?? null;
+        const now = Date.now();
+        const daysRemaining =
+          replaceBy instanceof Timestamp
+            ? Math.ceil((replaceBy.toMillis() - now) / (1000 * 60 * 60 * 24))
+            : null;
+        let status: ProductTrackingRecord["status"] = "ok";
+        if (data.replenished) {
+          status = "replenished";
+        } else if (daysRemaining != null) {
+          if (daysRemaining <= 0) status = "overdue";
+          else if (daysRemaining <= 30) status = "warning";
+        }
+        return {
+          id: doc.id,
+          projectId: data.projectId ?? "",
+          projectName: data.projectName ?? "Unnamed project",
+          itemId: data.itemId ?? "",
+          itemName: data.itemName ?? "Unknown item",
+          itemType: data.itemType ?? null,
+          itemCategory: data.itemCategory ?? data.category ?? null,
+          quantity: typeof data.quantity === "number" ? data.quantity : 0,
+          usefulLifeMonths:
+            typeof data.usefulLifeMonths === "number"
+              ? data.usefulLifeMonths
+              : null,
+          trackingType: (data.trackingType as ProductTrackingRecord["trackingType"]) ?? null,
+          replacementFrequencyPerYear:
+            typeof data.replacementFrequencyPerYear === "number"
+              ? data.replacementFrequencyPerYear
+              : null,
+          completedAt: data.completedAt ?? null,
+          replaceBy,
+          daysRemaining,
+          status,
+          replenished: Boolean(data.replenished),
+          replenishedAt: data.replenishedAt ?? null,
+          lastReplenishedAt: data.lastReplenishedAt ?? null,
+        };
+      });
+      setRecords(rows);
+    } catch (err: any) {
+      console.error("Error loading product tracking", err);
+      setError(err?.message ?? "Unable to load product tracking.");
+    } finally {
+      setLoading(false);
+    }
   }, []);
+
+  useEffect(() => {
+    fetchRecords();
+  }, [fetchRecords]);
 
   const upcoming = useMemo(() => {
     return [...records].sort((a, b) => {
@@ -134,6 +154,10 @@ export default function ProductTrackingPage() {
 
       {actionError && (
         <div className="ims-alert ims-alert--error">{actionError}</div>
+      )}
+
+      {actionMessage && (
+        <div className="ims-alert ims-alert--info">{actionMessage}</div>
       )}
 
       {error && <div className="ims-alert ims-alert--error">{error}</div>}
@@ -164,8 +188,9 @@ export default function ProductTrackingPage() {
                 <tr>
                   <th>Project</th>
                   <th>Product</th>
+                  <th>Type</th>
                   <th>Qty</th>
-                  <th>Useful life</th>
+                  <th>Replacement plan</th>
                   <th>Completed</th>
                   <th>Replace by</th>
                   <th>Time remaining</th>
@@ -188,14 +213,27 @@ export default function ProductTrackingPage() {
                         href={getInventoryDetailPath(
                           record.itemId,
                           record.itemType,
+                          record.itemCategory,
                         )}
                         className="ims-table-link"
                       >
                         {record.itemName}
                       </Link>
                     </td>
-                    <td>{record.quantity}</td>
-                    <td>{formatDuration(record.usefulLifeMonths)}</td>
+                        <td>
+                          {PROJECT_ITEM_LABELS[
+                            (record.itemType as keyof typeof PROJECT_ITEM_LABELS) ??
+                              "components"
+                          ] ?? "Item"}
+                        </td>
+                        <td>{record.quantity}</td>
+                        <td>
+                          {record.trackingType === "sensorExtra"
+                            ? record.replacementFrequencyPerYear
+                              ? `${formatNumber(record.replacementFrequencyPerYear)} / year`
+                              : "—"
+                            : formatDuration(record.usefulLifeMonths)}
+                        </td>
                     <td>{formatDate(record.completedAt)}</td>
                     <td>{formatDate(record.replaceBy)}</td>
                     <td>
@@ -269,23 +307,37 @@ export default function ProductTrackingPage() {
                             type="button"
                             className="ims-secondary-button"
                             onClick={async () => {
+                              const defaultDate =
+                                record.replaceBy instanceof Timestamp
+                                  ? record.replaceBy
+                                      .toDate()
+                                      .toISOString()
+                                      .split("T")[0]
+                                  : new Date().toISOString().split("T")[0];
+                              const input = window.prompt(
+                                "Confirm the next replenish date (YYYY-MM-DD)",
+                                defaultDate,
+                              );
+                              if (!input) {
+                                return;
+                              }
+                              const parsed = new Date(input);
+                              if (Number.isNaN(parsed.getTime())) {
+                                setActionError(
+                                  "Enter a valid date in the format YYYY-MM-DD.",
+                                );
+                                return;
+                              }
                               setActionError(null);
+                              setActionMessage(null);
                               setProcessingId(record.id);
                               try {
-                                await replenishTrackedProduct(record.id);
-                                const now = Timestamp.now();
-                                setRecords((prev) =>
-                                  prev.map((rec) =>
-                                    rec.id === record.id
-                                      ? {
-                                          ...rec,
-                                          replenished: true,
-                                          replenishedAt: now,
-                                          status: "replenished",
-                                        }
-                                      : rec,
-                                  ),
+                                await replenishTrackedProduct(
+                                  record.id,
+                                  Timestamp.fromDate(parsed),
                                 );
+                                await fetchRecords();
+                                setActionMessage("Product marked as replenished.");
                               } catch (err: any) {
                                 console.error(
                                   "Error replenishing product",

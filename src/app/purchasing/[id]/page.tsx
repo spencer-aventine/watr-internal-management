@@ -27,6 +27,9 @@ type PurchaseLine = {
   quantity?: number | null;
   unitPrice?: number | null;
   lineTotal?: number | null;
+  deliveryShare?: number | null;
+  adjustedUnitPrice?: number | null;
+  adjustedLineTotal?: number | null;
 };
 
 type PurchaseAttachment = {
@@ -52,8 +55,10 @@ type PurchaseRecord = {
   supplierAddress?: string | null;
   shipTo?: string | null;
   supplierId?: string | null;
+  deliveryFee?: number | null;
   reference?: string | null;
   purchaseDate?: Timestamp | null;
+  proposedDeliveryDate?: Timestamp | null;
   totalAmount?: number | null;
   notes?: string | null;
   createdAt?: Timestamp | null;
@@ -161,8 +166,11 @@ export default function PurchaseDetailPage() {
           supplierAddress: data.supplierAddress ?? null,
           shipTo: data.shipTo ?? null,
           supplierId: data.supplierId ?? null,
+          deliveryFee:
+            typeof data.deliveryFee === "number" ? data.deliveryFee : null,
           reference: data.reference ?? null,
           purchaseDate: data.purchaseDate ?? data.createdAt ?? null,
+          proposedDeliveryDate: data.proposedDeliveryDate ?? null,
           totalAmount:
             typeof data.totalAmount === "number" ? data.totalAmount : null,
           notes: data.notes ?? null,
@@ -280,6 +288,16 @@ export default function PurchaseDetailPage() {
 
   const canEditStockCounts = purchase?.status === "stock_received";
 
+  const itemsSubtotal = useMemo(() => {
+    if (!purchase) return 0;
+    return purchase.lineItems.reduce((sum, line) => {
+      if (typeof line.lineTotal === "number") {
+        return sum + line.lineTotal;
+      }
+      return sum;
+    }, 0);
+  }, [purchase]);
+
   const lineChangesPending = useMemo(() => {
     if (!purchase || purchase.lineItems.length === 0) return false;
     if (purchase.lineItems.length !== lineDrafts.length) {
@@ -328,13 +346,28 @@ export default function PurchaseDetailPage() {
       }
       const quantity = parsed;
       const hasUnitPrice = typeof line.unitPrice === "number";
+      const computedLineTotal =
+        hasUnitPrice && quantity != null
+          ? (line.unitPrice as number) * quantity
+          : line.lineTotal ?? null;
+      const deliveryShare =
+        typeof line.deliveryShare === "number" ? line.deliveryShare : 0;
+      const adjustedLineTotal =
+        computedLineTotal != null
+          ? computedLineTotal + deliveryShare
+          : deliveryShare > 0
+            ? deliveryShare
+            : null;
+      const adjustedUnitPrice =
+        hasUnitPrice && quantity > 0 && adjustedLineTotal != null
+          ? adjustedLineTotal / quantity
+          : line.adjustedUnitPrice ?? null;
       updatedLines.push({
         ...line,
         quantity,
-        lineTotal:
-          hasUnitPrice && quantity != null
-            ? (line.unitPrice as number) * quantity
-            : line.lineTotal ?? null,
+        lineTotal: computedLineTotal,
+        adjustedLineTotal,
+        adjustedUnitPrice,
       });
     }
 
@@ -532,6 +565,42 @@ export default function PurchaseDetailPage() {
             </div>
 
             <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))",
+                gap: "1rem",
+                marginTop: "1rem",
+              }}
+            >
+              <div>
+                <p className="ims-field-label">Items total</p>
+                <p style={{ margin: 0 }}>
+                  {itemsSubtotal > 0 ? formatCurrency(itemsSubtotal) : "—"}
+                </p>
+              </div>
+              <div>
+                <p className="ims-field-label">Delivery cost</p>
+                <p style={{ margin: 0 }}>
+                  {purchase.deliveryFee != null
+                    ? formatCurrency(purchase.deliveryFee)
+                    : "—"}
+                </p>
+              </div>
+              <div>
+                <p className="ims-field-label">Grand total</p>
+                <p style={{ margin: 0, fontWeight: 600 }}>
+                  {formatCurrency(
+                    purchase.totalAmount ??
+                      itemsSubtotal +
+                        (typeof purchase.deliveryFee === "number"
+                          ? purchase.deliveryFee
+                          : 0),
+                  )}
+                </p>
+              </div>
+            </div>
+
+            <div
               className="ims-field"
               style={{
                 maxWidth: "260px",
@@ -599,6 +668,10 @@ export default function PurchaseDetailPage() {
                 <div>{formatDate(purchase.purchaseDate)}</div>
               </div>
               <div className="ims-field">
+                <label className="ims-field-label">Proposed delivery</label>
+                <div>{formatDate(purchase.proposedDeliveryDate)}</div>
+              </div>
+              <div className="ims-field">
                 <label className="ims-field-label">Logged</label>
                 <div>{formatDate(purchase.createdAt)}</div>
               </div>
@@ -633,17 +706,20 @@ export default function PurchaseDetailPage() {
               <table className="ims-table">
                 <thead>
                   <tr>
-                    <th style={{ width: "35%" }}>Product</th>
+                    <th style={{ width: "28%" }}>Product</th>
                     <th>SKU</th>
                     <th>Quantity</th>
                     <th>Unit price</th>
+                    <th>Delivery alloc</th>
+                    <th>Adjusted unit</th>
+                    <th>Adjusted total</th>
                     <th>Total</th>
                   </tr>
                 </thead>
                 <tbody>
                   {purchase.lineItems.length === 0 ? (
                     <tr>
-                      <td colSpan={5} style={{ textAlign: "center" }}>
+                      <td colSpan={8} style={{ textAlign: "center" }}>
                         No line items captured for this purchase.
                       </td>
                     </tr>
@@ -672,6 +748,20 @@ export default function PurchaseDetailPage() {
                         price != null && qtyForTotal != null
                           ? price * qtyForTotal
                           : line.lineTotal ?? null;
+                      const deliveryShare =
+                        typeof line.deliveryShare === "number"
+                          ? line.deliveryShare
+                          : 0;
+                      const adjustedValue =
+                        value != null
+                          ? value + deliveryShare
+                          : line.adjustedLineTotal ?? null;
+                      const adjustedUnit =
+                        adjustedValue != null &&
+                        qtyForTotal != null &&
+                        qtyForTotal > 0
+                          ? adjustedValue / qtyForTotal
+                          : line.adjustedUnitPrice ?? null;
 
                       return (
                         <tr key={`${line.itemId ?? idx}-${idx}`}>
@@ -691,6 +781,9 @@ export default function PurchaseDetailPage() {
                             />
                           </td>
                           <td>{formatCurrency(price)}</td>
+                          <td>{formatCurrency(deliveryShare)}</td>
+                          <td>{formatCurrency(adjustedUnit)}</td>
+                          <td>{formatCurrency(adjustedValue)}</td>
                           <td>{formatCurrency(value)}</td>
                         </tr>
                       );

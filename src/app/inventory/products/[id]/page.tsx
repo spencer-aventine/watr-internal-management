@@ -1,2 +1,8 @@
 // src/app/inventory/products/[id]/page.tsx
-export { default } from "../../components/[id]/page";
+"use client";
+
+import InventoryItemDetailPage from "../../_components/InventoryItemDetailPage";
+
+export default function ProductDetailPage() {
+  return <InventoryItemDetailPage detailType="products" />;
+}

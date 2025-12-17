@@ -6,6 +6,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { db } from "@/lib/firebase";
 import { getInventoryDetailPath } from "@/lib/inventoryPaths";
+import { PROJECT_ITEM_LABELS } from "@/app/projects/_projectItemUtils";
 import {
   doc,
   getDoc,
@@ -22,12 +23,16 @@ type TrackingRecord = {
   itemId: string;
   itemName: string;
   itemType?: string | null;
+  itemCategory?: string | null;
   quantity: number;
-  usefulLifeMonths: number;
+  usefulLifeMonths: number | null;
+  trackingType?: "usefulLife" | "sensorExtra";
+  replacementFrequencyPerYear?: number | null;
   completedAt?: Timestamp | null;
   replaceBy?: Timestamp | null;
   replenished?: boolean;
   replenishedAt?: Timestamp | null;
+  lastReplenishedAt?: Timestamp | null;
   notes: TrackingNote[];
 };
 
@@ -47,8 +52,8 @@ const formatDate = (value?: Timestamp | null) => {
   }
 };
 
-const formatDuration = (months: number) => {
-  if (!Number.isFinite(months) || months <= 0) return "—";
+const formatDuration = (months?: number | null) => {
+  if (months == null || !Number.isFinite(months) || months <= 0) return "—";
   if (months === 1) return "1 month";
   return `${months} months`;
 };
@@ -94,6 +99,8 @@ export default function ProjectTrackingDetailPage() {
   const [processing, setProcessing] = useState(false);
   const [note, setNote] = useState("");
   const [savingNote, setSavingNote] = useState(false);
+  const [showReplenishForm, setShowReplenishForm] = useState(false);
+  const [nextReplenishDate, setNextReplenishDate] = useState("");
 
   useEffect(() => {
     const load = async () => {
@@ -116,15 +123,22 @@ export default function ProjectTrackingDetailPage() {
           itemId: data.itemId ?? "",
           itemName: data.itemName ?? "Unknown item",
           itemType: data.itemType ?? null,
+          itemCategory: data.itemCategory ?? data.category ?? null,
           quantity: typeof data.quantity === "number" ? data.quantity : 0,
           usefulLifeMonths:
             typeof data.usefulLifeMonths === "number"
               ? data.usefulLifeMonths
-              : 0,
+              : null,
+          trackingType: data.trackingType ?? null,
+          replacementFrequencyPerYear:
+            typeof data.replacementFrequencyPerYear === "number"
+              ? data.replacementFrequencyPerYear
+              : null,
           completedAt: data.completedAt ?? null,
           replaceBy: data.replaceBy ?? null,
           replenished: Boolean(data.replenished),
           replenishedAt: data.replenishedAt ?? null,
+          lastReplenishedAt: data.lastReplenishedAt ?? null,
           notes: Array.isArray(data.notes)
             ? data.notes.map((note: any) => ({
                 id: note.id ?? `note-${Math.random()}`,
@@ -145,13 +159,32 @@ export default function ProjectTrackingDetailPage() {
     load();
   }, [trackingId]);
 
+  useEffect(() => {
+    if (record?.replaceBy instanceof Timestamp) {
+      setNextReplenishDate(
+        record.replaceBy.toDate().toISOString().split("T")[0],
+      );
+    } else {
+      setNextReplenishDate(new Date().toISOString().split("T")[0]);
+    }
+  }, [record?.replaceBy]);
+
   const handleReplenish = async () => {
     if (!record || record.replenished) return;
+    if (!nextReplenishDate) {
+      setActionError("Select the next replenish date before confirming.");
+      return;
+    }
+    const parsed = new Date(nextReplenishDate);
+    if (Number.isNaN(parsed.getTime())) {
+      setActionError("Enter a valid next replenish date.");
+      return;
+    }
     setProcessing(true);
     setActionError(null);
     setActionMessage(null);
     try {
-      await replenishTrackedProduct(record.id);
+      await replenishTrackedProduct(record.id, Timestamp.fromDate(parsed));
       const now = Timestamp.now();
       setRecord((prev) =>
         prev
@@ -159,10 +192,12 @@ export default function ProjectTrackingDetailPage() {
               ...prev,
               replenished: true,
               replenishedAt: now,
+              lastReplenishedAt: now,
             }
           : prev,
       );
       setActionMessage("Product marked as replenished.");
+      setShowReplenishForm(false);
     } catch (err: any) {
       console.error("Error replenishing product", err);
       setActionError(err?.message ?? "Unable to replenish this product.");
@@ -247,7 +282,11 @@ export default function ProjectTrackingDetailPage() {
             <label className="ims-field-label">Product</label>
             <div>
               <Link
-                href={getInventoryDetailPath(record.itemId, record.itemType)}
+                href={getInventoryDetailPath(
+                  record.itemId,
+                  record.itemType,
+                  record.itemCategory,
+                )}
                 className="ims-table-link"
               >
                 {record.itemName}
@@ -261,19 +300,43 @@ export default function ProjectTrackingDetailPage() {
               <div>{record.quantity}</div>
             </div>
             <div className="ims-field">
-              <label className="ims-field-label">Useful life</label>
-              <div>{formatDuration(record.usefulLifeMonths)}</div>
+              <label className="ims-field-label">Type</label>
+              <div>
+                {record.itemType
+                  ? PROJECT_ITEM_LABELS[
+                      (record.itemType as keyof typeof PROJECT_ITEM_LABELS) ??
+                        "components"
+                    ]
+                  : "Item"}
+              </div>
             </div>
           </div>
 
           <div className="ims-field-row">
             <div className="ims-field">
+              <label className="ims-field-label">Replacement plan</label>
+              <div>
+                {record.trackingType === "sensorExtra"
+                  ? record.replacementFrequencyPerYear
+                    ? `${record.replacementFrequencyPerYear} / year`
+                    : "—"
+                  : formatDuration(record.usefulLifeMonths)}
+              </div>
+            </div>
+            <div className="ims-field">
               <label className="ims-field-label">Completed</label>
               <div>{formatDate(record.completedAt)}</div>
             </div>
+          </div>
+
+          <div className="ims-field-row">
             <div className="ims-field">
               <label className="ims-field-label">Replacement due</label>
               <div>{formatDate(record.replaceBy)}</div>
+            </div>
+            <div className="ims-field">
+              <label className="ims-field-label">Last replenished</label>
+              <div>{formatDate(record.lastReplenishedAt)}</div>
             </div>
           </div>
 
@@ -304,15 +367,59 @@ export default function ProjectTrackingDetailPage() {
           </div>
 
           {!record.replenished && (
-            <div className="ims-form-actions">
-              <button
-                type="button"
-                className="ims-primary-button"
-                onClick={handleReplenish}
-                disabled={processing}
-              >
-                {processing ? "Marking…" : "Mark as replenished"}
-              </button>
+            <div
+              className="ims-form-actions"
+              style={{
+                flexDirection: "column",
+                alignItems: "flex-start",
+                gap: "0.75rem",
+              }}
+            >
+              {showReplenishForm ? (
+                <>
+                  <div className="ims-field" style={{ maxWidth: "260px" }}>
+                    <label
+                      className="ims-field-label"
+                      htmlFor="nextReplenishDate"
+                    >
+                      Next replenish date
+                    </label>
+                    <input
+                      id="nextReplenishDate"
+                      type="date"
+                      className="ims-field-input"
+                      value={nextReplenishDate}
+                      onChange={(e) => setNextReplenishDate(e.target.value)}
+                    />
+                  </div>
+                  <div style={{ display: "flex", gap: "0.75rem" }}>
+                    <button
+                      type="button"
+                      className="ims-secondary-button"
+                      onClick={() => setShowReplenishForm(false)}
+                      disabled={processing}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      className="ims-primary-button"
+                      onClick={handleReplenish}
+                      disabled={processing}
+                    >
+                      {processing ? "Marking…" : "Confirm replenishment"}
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <button
+                  type="button"
+                  className="ims-primary-button"
+                  onClick={() => setShowReplenishForm(true)}
+                >
+                  Mark as replenished
+                </button>
+              )}
             </div>
           )}
 

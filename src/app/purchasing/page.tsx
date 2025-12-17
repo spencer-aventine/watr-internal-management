@@ -53,8 +53,10 @@ type PurchaseFormState = {
   supplierContact: string;
   supplierAddress: string;
   shipTo: string;
+  deliveryFee: string;
   reference: string;
   purchaseDate: string;
+  proposedDeliveryDate: string;
   notes: string;
   status: PurchaseStatus;
 };
@@ -62,6 +64,11 @@ type PurchaseFormState = {
 type PurchaseStatus = "draft" | "paid" | "stock_received";
 
 const todayIso = () => new Date().toISOString().split("T")[0];
+const nextWeekIso = () => {
+  const date = new Date();
+  date.setDate(date.getDate() + 7);
+  return date.toISOString().split("T")[0];
+};
 
 const emptyLine = (id: number): PurchaseLineState => ({
   id: `line-${id}`,
@@ -79,8 +86,10 @@ export default function PurchasingPage() {
     supplierContact: "",
     supplierAddress: "",
     shipTo: "",
+    deliveryFee: "",
     reference: "",
     purchaseDate: todayIso(),
+    proposedDeliveryDate: nextWeekIso(),
     notes: "",
     status: "draft",
   });
@@ -269,6 +278,14 @@ export default function PurchasingPage() {
     if (!line.hasUnitPrice) return sum;
     return sum + line.lineTotal;
   }, 0);
+  const deliveryFeeInput =
+    form.deliveryFee.trim() === "" ? null : Number(form.deliveryFee);
+  const hasDeliveryFeeInput =
+    deliveryFeeInput != null &&
+    Number.isFinite(deliveryFeeInput) &&
+    deliveryFeeInput >= 0;
+  const deliveryFeeValue = hasDeliveryFeeInput ? deliveryFeeInput : 0;
+  const grandTotal = orderTotal + deliveryFeeValue;
 
   const resetForm = () => {
     setForm({
@@ -276,8 +293,10 @@ export default function PurchasingPage() {
       supplierContact: "",
       supplierAddress: "",
       shipTo: "",
+      deliveryFee: "",
       reference: "",
       purchaseDate: todayIso(),
+      proposedDeliveryDate: nextWeekIso(),
       notes: "",
       status: "draft",
     });
@@ -307,15 +326,45 @@ export default function PurchasingPage() {
       const purchaseDate = form.purchaseDate
         ? Timestamp.fromDate(new Date(form.purchaseDate))
         : now;
+      const proposedDeliveryDate = form.proposedDeliveryDate
+        ? Timestamp.fromDate(new Date(form.proposedDeliveryDate))
+        : null;
+      const deliveryRaw =
+        form.deliveryFee.trim() === "" ? null : Number(form.deliveryFee);
+      const hasDeliveryFee =
+        deliveryRaw != null &&
+        Number.isFinite(deliveryRaw) &&
+        deliveryRaw >= 0;
+      const safeDeliveryFee = hasDeliveryFee ? deliveryRaw : 0;
+      const totalQuantityOrdered = validLines.reduce(
+        (sum, line) => sum + line.quantity,
+        0,
+      );
 
-      const linePayload = validLines.map((line) => ({
-        itemId: line.itemId,
-        sku: line.sku,
-        name: line.name,
-        quantity: line.quantity,
-        unitPrice: line.hasUnitPrice ? line.unitPrice : null,
-        lineTotal: line.hasUnitPrice ? line.lineTotal : null,
-      }));
+      const linePayload = validLines.map((line) => {
+        const deliveryShare =
+          safeDeliveryFee > 0 && totalQuantityOrdered > 0
+            ? (safeDeliveryFee * line.quantity) / totalQuantityOrdered
+            : 0;
+        const adjustedLineTotal = line.hasUnitPrice
+          ? line.lineTotal + deliveryShare
+          : null;
+        const adjustedUnitPrice =
+          adjustedLineTotal != null && line.quantity > 0
+            ? adjustedLineTotal / line.quantity
+            : null;
+        return {
+          itemId: line.itemId,
+          sku: line.sku,
+          name: line.name,
+          quantity: line.quantity,
+          unitPrice: line.hasUnitPrice ? line.unitPrice : null,
+          lineTotal: line.hasUnitPrice ? line.lineTotal : null,
+          deliveryShare: deliveryShare > 0 ? deliveryShare : null,
+          adjustedUnitPrice,
+          adjustedLineTotal,
+        };
+      });
       const lineItemIds = Array.from(
         new Set(validLines.map((line) => line.itemId).filter(Boolean)),
       );
@@ -328,10 +377,13 @@ export default function PurchasingPage() {
         supplierAddress: form.supplierAddress.trim() || null,
         shipTo: form.shipTo.trim() || null,
         supplierId: selectedSupplierId || null,
+        deliveryFee: hasDeliveryFee ? safeDeliveryFee : null,
         reference: form.reference.trim() || null,
         notes: form.notes.trim() || null,
         purchaseDate,
-        totalAmount: orderTotal || null,
+        proposedDeliveryDate,
+        totalAmount:
+          orderTotal + safeDeliveryFee > 0 ? orderTotal + safeDeliveryFee : null,
         lineItems: linePayload,
         lineItemIds,
         status: form.status,
@@ -562,6 +614,26 @@ export default function PurchasingPage() {
           </div>
 
           <div className="ims-field">
+            <label className="ims-field-label" htmlFor="deliveryFee">
+              Delivery / freight cost (£)
+            </label>
+            <input
+              id="deliveryFee"
+              type="number"
+              min="0"
+              step="0.01"
+              className="ims-field-input"
+              value={form.deliveryFee}
+              onChange={(e) => handleFormChange("deliveryFee", e.target.value)}
+              placeholder="0.00"
+            />
+            <p className="ims-field-help">
+              We’ll spread this cost across each line item to give a landed unit
+              price.
+            </p>
+          </div>
+
+          <div className="ims-field">
             <button
               type="button"
               className="ims-secondary-button"
@@ -611,6 +683,20 @@ export default function PurchasingPage() {
                 value={form.purchaseDate}
                 onChange={(e) =>
                   handleFormChange("purchaseDate", e.target.value)
+                }
+              />
+            </div>
+            <div className="ims-field">
+              <label className="ims-field-label" htmlFor="proposedDeliveryDate">
+                Proposed delivery
+              </label>
+              <input
+                id="proposedDeliveryDate"
+                type="date"
+                className="ims-field-input"
+                value={form.proposedDeliveryDate}
+                onChange={(e) =>
+                  handleFormChange("proposedDeliveryDate", e.target.value)
                 }
               />
             </div>
@@ -769,14 +855,27 @@ export default function PurchasingPage() {
               display: "flex",
               justifyContent: "flex-end",
               marginTop: "1rem",
-              fontSize: "1rem",
-              fontWeight: 600,
             }}
           >
-            Order total:{" "}
-            <span style={{ marginLeft: "0.35rem" }}>
-              £{orderTotal.toFixed(2)}
-            </span>
+            <div style={{ textAlign: "right" }}>
+              <div style={{ fontWeight: 500, color: "#475569" }}>
+                Items total:{" "}
+                <strong style={{ color: "#0f172a" }}>
+                  £{orderTotal.toFixed(2)}
+                </strong>
+              </div>
+              <div style={{ fontWeight: 500, color: "#475569" }}>
+                Delivery:{" "}
+                <strong style={{ color: "#0f172a" }}>
+                  {hasDeliveryFeeInput
+                    ? `£${deliveryFeeValue.toFixed(2)}`
+                    : "—"}
+                </strong>
+              </div>
+              <div style={{ fontWeight: 600, fontSize: "1.1rem" }}>
+                Order total: £{grandTotal.toFixed(2)}
+              </div>
+            </div>
           </div>
         </section>
 

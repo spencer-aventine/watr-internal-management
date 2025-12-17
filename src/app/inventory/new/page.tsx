@@ -1,104 +1,214 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { db } from "@/lib/firebase";
 import {
   addDoc,
   collection,
   getDocs,
-  Timestamp,
-  query,
   orderBy,
+  query,
+  Timestamp,
 } from "firebase/firestore";
+import { useAuth } from "@/app/_components/AuthProvider";
+import { normalizeItemType } from "@/lib/inventoryPaths";
 
-type ItemType = "component" | "sub-assembly" | "finished-good" | "service";
-
-type Category = {
-  id: string;
-  name: string;
-  parentId?: string | null;
-};
+type ItemType =
+  | "product"
+  | "sub assembly"
+  | "component"
+  | "sensor"
+  | "sensor extra";
 
 type FormState = {
-  sku: string;
   name: string;
+  shortCode: string;
   description: string;
   itemType: ItemType;
   category: string;
-  trackSerialNumber: boolean;
-  unitOfMeasure: string;
-
-  primaryCategoryId: string;
-  subCategoryIds: string[];
-
+  supplier1: string;
+  supplier2: string;
+  supplier1Id: string;
+  supplier2Id: string;
+  quantity: string;
   standardCost: string;
-  standardCostCurrency: string;
-
-  reorderLevel: string;
-  reorderQuantity: string;
-
   usefulLifeMonths: string;
-
-  status: "active" | "discontinued";
-
-  hubspotProductId: string;
-  xeroItemCode: string;
 };
 
 const initialFormState: FormState = {
-  sku: "",
   name: "",
+  shortCode: "",
   description: "",
   itemType: "component",
   category: "",
-  trackSerialNumber: false,
-  unitOfMeasure: "ea",
-  primaryCategoryId: "",
-  subCategoryIds: [],
+  supplier1: "",
+  supplier2: "",
+  supplier1Id: "",
+  supplier2Id: "",
+  quantity: "",
   standardCost: "",
-  standardCostCurrency: "GBP",
-  reorderLevel: "",
-  reorderQuantity: "",
   usefulLifeMonths: "",
-  status: "active",
-  hubspotProductId: "",
-  xeroItemCode: "",
+};
+
+type SupplierOption = {
+  id: string;
+  name: string;
+};
+
+type SensorExtraOption = {
+  id: string;
+  name: string;
+  sku?: string | null;
+};
+
+type SelectedSensorExtra = {
+  id: string;
+  name: string;
+  sku?: string | null;
 };
 
 export default function NewProductPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [form, setForm] = useState<FormState>(initialFormState);
-  const [categories, setCategories] = useState<Category[]>([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const presetAppliedRef = useRef(false);
+  const { canEdit } = useAuth();
+  const isReadOnly = !canEdit;
+  const [supplierOptions, setSupplierOptions] = useState<SupplierOption[]>([]);
+  const [loadingSuppliers, setLoadingSuppliers] = useState(true);
+  const [supplierError, setSupplierError] = useState<string | null>(null);
+  const [sensorExtraOptions, setSensorExtraOptions] = useState<SensorExtraOption[]>([]);
+  const [loadingSensorExtras, setLoadingSensorExtras] = useState(true);
+  const [sensorExtraError, setSensorExtraError] = useState<string | null>(null);
+  const [selectedSensorExtras, setSelectedSensorExtras] = useState<SelectedSensorExtra[]>([]);
 
-  // Load categories from Firestore (categories collection)
+  const creationPresets = {
+    products: {
+      label: "Product",
+      itemType: "product" as ItemType,
+      category: "Unit",
+    },
+    subAssemblies: {
+      label: "Sub-assembly",
+      itemType: "sub assembly" as ItemType,
+      category: "Unit",
+    },
+    components: {
+      label: "Component",
+      itemType: "component" as ItemType,
+      category: "",
+    },
+    sensors: {
+      label: "Sensor",
+      itemType: "sensor" as ItemType,
+      category: "Sensor",
+    },
+    sensorExtras: {
+      label: "Sensor extra",
+      itemType: "sensor extra" as ItemType,
+      category: "Sensor Extra",
+    },
+  } as const;
+
+  type CreationPresetKey = keyof typeof creationPresets;
+
+  const presetKey = searchParams.get("type") as CreationPresetKey | null;
+  const activePreset = useMemo(
+    () => (presetKey ? creationPresets[presetKey] : null),
+    [presetKey],
+  );
+
   useEffect(() => {
-    const loadCategories = async () => {
+    if (!activePreset || presetAppliedRef.current) return;
+    setForm((prev) => ({
+      ...prev,
+      itemType: activePreset.itemType,
+      category: activePreset.category ?? prev.category,
+    }));
+    presetAppliedRef.current = true;
+  }, [activePreset]);
+
+  useEffect(() => {
+    const loadSuppliers = async () => {
+      setLoadingSuppliers(true);
+      setSupplierError(null);
       try {
-        const ref = collection(db, "categories");
-        const q = query(ref, orderBy("name"));
-        const snapshot = await getDocs(q);
-        const cats: Category[] = snapshot.docs.map((doc) => {
-          const data = doc.data() as any;
-          return {
-            id: doc.id,
-            name: data.name ?? "Unnamed",
-            parentId: data.parentId ?? null,
-          };
+        const snap = await getDocs(
+          query(collection(db, "suppliers"), orderBy("name")),
+        );
+        const rows: SupplierOption[] = snap.docs.map((docSnap) => {
+          const data = docSnap.data() as any;
+          return { id: docSnap.id, name: data.name ?? "Unnamed supplier" };
         });
-        setCategories(cats);
-      } catch (err) {
-        console.error("Error loading categories", err);
+        setSupplierOptions(rows);
+      } catch (err: any) {
+        console.error("Error loading suppliers", err);
+        setSupplierError(err?.message ?? "Unable to load suppliers.");
+      } finally {
+        setLoadingSuppliers(false);
       }
     };
 
-    loadCategories();
+    loadSuppliers();
   }, []);
 
-  const topLevelCategories = categories.filter((c) => !c.parentId);
-  const subcategories = categories.filter((c) => c.parentId);
+  useEffect(() => {
+    const loadSensorExtras = async () => {
+      setLoadingSensorExtras(true);
+      setSensorExtraError(null);
+      try {
+        const snap = await getDocs(
+          query(collection(db, "items"), orderBy("name")),
+        );
+        const rows: SensorExtraOption[] = snap.docs
+          .map((docSnap) => {
+            const data = docSnap.data() as any;
+            const type = normalizeItemType(
+              data.itemType ?? data.rawCsvItemType ?? data.category ?? "",
+            );
+            if (
+              type !== "sensor extra" &&
+              type !== "sensor extras" &&
+              type !== "sensorextra"
+            ) {
+              return null;
+            }
+            return {
+              id: docSnap.id,
+              name: data.name ?? data.sku ?? "Sensor extra",
+              sku: data.sku ?? data.shortCode ?? null,
+            };
+          })
+          .filter(
+            (option): option is SensorExtraOption => option !== null,
+          );
+        setSensorExtraOptions(rows);
+      } catch (err: any) {
+        console.error("Error loading sensor extras", err);
+        setSensorExtraError(err?.message ?? "Unable to load sensor extras.");
+      } finally {
+        setLoadingSensorExtras(false);
+      }
+    };
+
+    loadSensorExtras();
+  }, []);
+
+  const creationLabel = activePreset?.label ?? "Item";
+
+  const availableSensorExtras = useMemo(
+    () =>
+      sensorExtraOptions.filter(
+        (option) =>
+          !selectedSensorExtras.some((selected) => selected.id === option.id),
+      ),
+    [sensorExtraOptions, selectedSensorExtras],
+  );
+
+  const isSensor = form.itemType === "sensor";
 
   const handleChange = (
     field: keyof FormState,
@@ -107,29 +217,34 @@ export default function NewProductPage() {
     setForm((prev) => ({ ...prev, [field]: value }));
   };
 
-  const handleSubcategoryToggle = (id: string) => {
-    setForm((prev) => {
-      const exists = prev.subCategoryIds.includes(id);
-      return {
-        ...prev,
-        subCategoryIds: exists
-          ? prev.subCategoryIds.filter((x) => x !== id)
-          : [...prev.subCategoryIds, id],
-      };
-    });
+  const handleAddSensorExtra = (extraId: string) => {
+    if (!extraId) return;
+    const option = sensorExtraOptions.find((opt) => opt.id === extraId);
+    if (!option) return;
+    setSelectedSensorExtras((prev) => [
+      ...prev,
+      { id: option.id, name: option.name, sku: option.sku },
+    ]);
+  };
+
+  const handleRemoveSensorExtra = (extraId: string) => {
+    setSelectedSensorExtras((prev) => prev.filter((extra) => extra.id !== extraId));
   };
 
   const validate = (): string | null => {
-    if (!form.sku.trim()) return "SKU is required.";
     if (!form.name.trim()) return "Name is required.";
-    if (!form.primaryCategoryId) return "Primary category is required.";
-    if (!form.standardCost) return "Standard cost is required.";
+    if (!form.shortCode.trim()) return "Short code is required.";
+    if (!form.standardCost.trim()) return "Cost price is required.";
     return null;
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
+    if (isReadOnly) {
+      setError("You do not have permission to add inventory items.");
+      return;
+    }
 
     const validationError = validate();
     if (validationError) {
@@ -140,40 +255,50 @@ export default function NewProductPage() {
     setSaving(true);
     try {
       const now = Timestamp.now();
+      const quantityNumber = Number(form.quantity);
+      const costNumber = Number(form.standardCost);
+
+      const supplier1Option = supplierOptions.find(
+        (supplier) => supplier.id === form.supplier1Id,
+      );
+      const supplier2Option = supplierOptions.find(
+        (supplier) => supplier.id === form.supplier2Id,
+      );
+      const mandatorySensorExtras =
+        form.itemType === "sensor"
+          ? selectedSensorExtras.map((extra) => ({
+              sensorExtraId: extra.id,
+              name: extra.name,
+              sku: extra.sku ?? null,
+              mandatory: true,
+            }))
+          : [];
 
       await addDoc(collection(db, "items"), {
-        sku: form.sku.trim(),
         name: form.name.trim(),
         shortName: form.name.trim(),
         description: form.description.trim() || null,
-
-        primaryCategoryId: form.primaryCategoryId,
-        subCategoryIds: form.subCategoryIds,
-
         itemType: form.itemType,
         category: form.category || null,
-        trackSerialNumber: form.trackSerialNumber,
-        unitOfMeasure: form.unitOfMeasure,
-
-        status: form.status,
-        dateIntroduced: now,
-        dateDiscontinued: form.status === "discontinued" ? now : null,
-
-        standardCost: Number(form.standardCost),
-        standardCostCurrency: form.standardCostCurrency,
-        reorderLevel: form.reorderLevel ? Number(form.reorderLevel) : null,
-        reorderQuantity: form.reorderQuantity
-          ? Number(form.reorderQuantity)
-          : null,
-
+        shortCode: form.shortCode.trim(),
+        supplier1: supplier1Option?.name ?? "",
+        supplier1Id: supplier1Option?.id ?? null,
+        supplier2: supplier2Option?.name ?? "",
+        supplier2Id: supplier2Option?.id ?? null,
+        inventoryQty:
+          Number.isFinite(quantityNumber) && quantityNumber
+            ? quantityNumber
+            : 0,
+        standardCost: Number.isFinite(costNumber) ? costNumber : 0,
+        standardCostCurrency: "GBP",
         usefulLifeMonths: form.usefulLifeMonths
           ? Number(form.usefulLifeMonths)
           : null,
-
-        hubspotProductId: form.hubspotProductId || null,
-        xeroItemCode: form.xeroItemCode || null,
-
-        createdByUserId: "system", // TODO: replace with auth user id
+        ...(form.itemType === "sensor"
+          ? { mandatorySensorExtras }
+          : {}),
+        status: "active",
+        createdByUserId: "system",
         createdAt: now,
         updatedAt: now,
       });
@@ -192,10 +317,10 @@ export default function NewProductPage() {
     <div className="ims-content">
       <div className="ims-page-header ims-page-header--with-actions">
         <div>
-          <h1 className="ims-page-title">Add Product</h1>
+          <h1 className="ims-page-title">Add {creationLabel}</h1>
           <p className="ims-page-subtitle">
-            Create a new item in the WATR inventory master, including
-            categories, costing and integration hooks.
+            Create a new {creationLabel.toLowerCase()} in the WATR inventory master,
+            including categories, costing and integration hooks.
           </p>
         </div>
         <div className="ims-page-actions">
@@ -210,366 +335,295 @@ export default function NewProductPage() {
             type="submit"
             form="new-product-form"
             className="ims-primary-button"
-            disabled={saving}
+            disabled={saving || isReadOnly}
           >
             {saving ? "Saving…" : "Save Product"}
           </button>
         </div>
       </div>
 
+      {isReadOnly && (
+        <div className="ims-alert ims-alert--info">
+          You are in view-only mode. Browse existing items, but you will need an
+          elevated account to add or edit inventory.
+        </div>
+      )}
+
       <form
         id="new-product-form"
-        className="ims-form-grid"
+        className="ims-form-section card"
         onSubmit={handleSubmit}
       >
-        {/* Left column: basics + categories */}
-        <section className="ims-form-section card">
-          <h2 className="ims-form-section-title">Basic details</h2>
+        <fieldset
+          disabled={isReadOnly}
+          style={{ border: 0, padding: 0, margin: 0 }}
+        >
+          <h2 className="ims-form-section-title">Component basics</h2>
           <p className="ims-form-section-subtitle">
-            Define how this item will appear in the inventory, projects and
-            assets.
+            Capture the minimum data we need to start tracking this component in
+            inventory.
           </p>
 
-          <div className="ims-field">
-            <label className="ims-field-label" htmlFor="sku">
-              SKU / Part code<span className="ims-required">*</span>
-            </label>
-            <input
-              id="sku"
-              type="text"
-              className="ims-field-input"
-              value={form.sku}
-              onChange={(e) => handleChange("sku", e.target.value)}
-            />
-          </div>
+        <div className="ims-field">
+          <label className="ims-field-label" htmlFor="name">
+            Name<span className="ims-required">*</span>
+          </label>
+          <input
+            id="name"
+            type="text"
+            className="ims-field-input"
+            value={form.name}
+            onChange={(e) => handleChange("name", e.target.value)}
+          />
+        </div>
 
-          <div className="ims-field">
-            <label className="ims-field-label" htmlFor="name">
-              Name<span className="ims-required">*</span>
-            </label>
-            <input
-              id="name"
-              type="text"
-              className="ims-field-input"
-              value={form.name}
-              onChange={(e) => handleChange("name", e.target.value)}
-            />
-          </div>
+        <div className="ims-field">
+          <label className="ims-field-label" htmlFor="shortCode">
+            Short code<span className="ims-required">*</span>
+          </label>
+          <input
+            id="shortCode"
+            type="text"
+            className="ims-field-input"
+            value={form.shortCode}
+            onChange={(e) => handleChange("shortCode", e.target.value)}
+          />
+        </div>
 
+        <div className="ims-field">
+          <label className="ims-field-label" htmlFor="description">
+            Description
+          </label>
+          <textarea
+            id="description"
+            className="ims-field-input ims-field-textarea"
+            rows={3}
+            value={form.description}
+            onChange={(e) => handleChange("description", e.target.value)}
+          />
+        </div>
+
+        <div className="ims-field-row">
           <div className="ims-field">
-            <label className="ims-field-label" htmlFor="description">
-              Description
+            <label className="ims-field-label" htmlFor="itemType">
+              Type
             </label>
-            <textarea
-              id="description"
-              className="ims-field-input ims-field-textarea"
-              rows={3}
-              value={form.description}
-              onChange={(e) => handleChange("description", e.target.value)}
-            />
+            <select
+              id="itemType"
+              className="ims-field-input"
+              value={form.itemType}
+              onChange={(e) =>
+                handleChange("itemType", e.target.value as ItemType)
+              }
+            >
+              <option value="component">Component</option>
+              <option value="product">Product</option>
+              <option value="sub assembly">Sub-assembly</option>
+              <option value="sensor">Sensor</option>
+              <option value="sensor extra">Sensor extra</option>
+            </select>
           </div>
+          <div className="ims-field">
+            <label className="ims-field-label" htmlFor="category">
+              Category
+            </label>
+            <select
+              id="category"
+              className="ims-field-input"
+              value={form.category}
+              onChange={(e) => handleChange("category", e.target.value)}
+            >
+              <option value="">Select category…</option>
+              {CATEGORY_OPTIONS.map((option) => (
+                <option key={option} value={option}>
+                  {option}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
 
           <div className="ims-field-row">
             <div className="ims-field">
-              <label className="ims-field-label" htmlFor="itemType">
-                Item type
+              <label className="ims-field-label" htmlFor="supplier1">
+                Supplier 1
               </label>
               <select
-                id="itemType"
+                id="supplier1"
                 className="ims-field-input"
-                value={form.itemType}
-                onChange={(e) =>
-                  handleChange("itemType", e.target.value as ItemType)
-                }
+                value={form.supplier1Id}
+                onChange={(e) => handleChange("supplier1Id", e.target.value)}
+                disabled={isReadOnly || loadingSuppliers}
               >
-                <option value="component">Component</option>
-                <option value="sub-assembly">Sub-assembly</option>
-                <option value="finished-good">Finished good</option>
-                <option value="service">Service</option>
-              </select>
-            </div>
-            <div className="ims-field">
-              <label className="ims-field-label" htmlFor="category">
-                Category
-              </label>
-              <select
-                id="category"
-                className="ims-field-input"
-                value={form.category}
-                onChange={(e) => handleChange("category", e.target.value)}
-              >
-                <option value="">Select category…</option>
-                {CATEGORY_OPTIONS.map((option) => (
-                  <option key={option} value={option}>
-                    {option}
+                <option value="">Select supplier…</option>
+                {supplierOptions.map((option) => (
+                  <option key={option.id} value={option.id}>
+                    {option.name}
                   </option>
                 ))}
               </select>
             </div>
             <div className="ims-field">
-              <label className="ims-field-label" htmlFor="unitOfMeasure">
-                Unit of measure
+              <label className="ims-field-label" htmlFor="supplier2">
+                Supplier 2
               </label>
-              <input
-                id="unitOfMeasure"
-                type="text"
+              <select
+                id="supplier2"
                 className="ims-field-input"
-                value={form.unitOfMeasure}
-                onChange={(e) =>
-                  handleChange("unitOfMeasure", e.target.value)
-                }
-              />
+                value={form.supplier2Id}
+                onChange={(e) => handleChange("supplier2Id", e.target.value)}
+                disabled={isReadOnly || loadingSuppliers}
+              >
+                <option value="">Select supplier…</option>
+                {supplierOptions.map((option) => (
+                  <option key={option.id} value={option.id}>
+                    {option.name}
+                  </option>
+                ))}
+              </select>
             </div>
           </div>
 
-          <div className="ims-field ims-field--inline">
-            <label className="ims-field-label">Serial tracking</label>
-            <label className="ims-toggle">
-              <input
-                type="checkbox"
-                checked={form.trackSerialNumber}
-                onChange={(e) =>
-                  handleChange("trackSerialNumber", e.target.checked)
-                }
-              />
-              <span className="ims-toggle-slider" />
-              <span className="ims-toggle-label">
-                Track individual serial numbers
-              </span>
-            </label>
-          </div>
+          {supplierError && (
+            <p className="ims-field-help" style={{ color: "#b91c1c" }}>
+              {supplierError}
+            </p>
+          )}
+          {!loadingSuppliers && !supplierOptions.length && (
+            <p className="ims-field-help">
+              No suppliers found. Add one from the Suppliers page to link it here.
+            </p>
+          )}
 
-          <hr className="ims-form-divider" />
-
-          <h2 className="ims-form-section-title">Categories</h2>
-          <p className="ims-form-section-subtitle">
-            Use categories to drive reporting and future configurator logic.
-            A primary category is required; sub-categories are optional.
-          </p>
-
-          <div className="ims-field">
-            <label className="ims-field-label" htmlFor="primaryCategoryId">
-              Primary category<span className="ims-required">*</span>
-            </label>
-            <select
-              id="primaryCategoryId"
-              className="ims-field-input"
-              value={form.primaryCategoryId}
-              onChange={(e) =>
-                handleChange("primaryCategoryId", e.target.value)
-              }
-            >
-              <option value="">Select a category…</option>
-              {topLevelCategories.map((cat) => (
-                <option key={cat.id} value={cat.id}>
-                  {cat.name}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          {subcategories.length > 0 && (
+          {isSensor && (
             <div className="ims-field">
-              <label className="ims-field-label">
-                Sub-categories (optional)
+              <label className="ims-field-label" htmlFor="mandatorySensorExtras">
+                Mandatory sensor extras
               </label>
-              <div className="ims-chip-list">
-                {subcategories.map((cat) => (
-                  <button
-                    key={cat.id}
-                    type="button"
-                    className={
-                      "ims-chip" +
-                      (form.subCategoryIds.includes(cat.id)
-                        ? " ims-chip--selected"
-                        : "")
-                    }
-                    onClick={() => handleSubcategoryToggle(cat.id)}
-                  >
-                    {cat.name}
-                  </button>
-                ))}
-              </div>
               <p className="ims-field-help">
-                Use sub-categories for finer grouping (e.g. “Sensors &gt; Water
-                Quality”).
+                Choose the extras that must accompany this sensor when it is deployed.
               </p>
+              <select
+                id="mandatorySensorExtras"
+                className="ims-field-input"
+                defaultValue=""
+                onChange={(e) => {
+                  handleAddSensorExtra(e.target.value);
+                  e.target.value = "";
+                }}
+                disabled={availableSensorExtras.length === 0 || isReadOnly || loadingSensorExtras}
+              >
+                <option value="">
+                  {loadingSensorExtras
+                    ? "Loading sensor extras…"
+                    : "Select sensor extra…"}
+                </option>
+                {availableSensorExtras.map((option) => (
+                  <option key={option.id} value={option.id}>
+                    {option.name}
+                    {option.sku ? ` (${option.sku})` : ""}
+                  </option>
+                ))}
+              </select>
+              {sensorExtraError && (
+                <p className="ims-field-help" style={{ color: "#b91c1c" }}>
+                  {sensorExtraError}
+                </p>
+              )}
+              {!loadingSensorExtras && !sensorExtraOptions.length && (
+                <p className="ims-field-help">
+                  No sensor extras available yet. Add them to inventory to link them here.
+                </p>
+              )}
+              {selectedSensorExtras.length === 0 ? (
+                <p className="ims-field-help" style={{ marginTop: "0.5rem" }}>
+                  No mandatory extras selected.
+                </p>
+              ) : (
+                <ul className="ims-list" style={{ marginTop: "0.5rem" }}>
+                  {selectedSensorExtras.map((extra) => (
+                    <li key={extra.id}>
+                      <div
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "space-between",
+                          gap: "0.5rem",
+                        }}
+                      >
+                        <div>
+                          <div style={{ fontWeight: 600 }}>{extra.name}</div>
+                          {extra.sku && (
+                            <div
+                              style={{
+                                fontSize: "0.8rem",
+                                color: "#6b7280",
+                              }}
+                            >
+                              {extra.sku}
+                            </div>
+                          )}
+                        </div>
+                        <button
+                          type="button"
+                          className="ims-table-link"
+                          onClick={() => handleRemoveSensorExtra(extra.id)}
+                          disabled={isReadOnly}
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              )}
             </div>
           )}
-        </section>
 
-        {/* Right column: costing, replenishment, lifecycle, integrations */}
-        <section className="ims-form-stack">
-          <div className="ims-form-section card">
-            <h2 className="ims-form-section-title">Costing</h2>
-            <p className="ims-form-section-subtitle">
-              Set standard cost for configurator, project costing and COGs.
-            </p>
-
-            <div className="ims-field-row">
-              <div className="ims-field">
-                <label className="ims-field-label" htmlFor="standardCost">
-                  Standard cost<span className="ims-required">*</span>
-                </label>
-                <input
-                  id="standardCost"
-                  type="number"
-                  min="0"
-                  step="0.01"
-                  className="ims-field-input"
-                  value={form.standardCost}
-                  onChange={(e) =>
-                    handleChange("standardCost", e.target.value)
-                  }
-                />
-              </div>
-              <div className="ims-field">
-                <label
-                  className="ims-field-label"
-                  htmlFor="standardCostCurrency"
-                >
-                  Currency
-                </label>
-                <select
-                  id="standardCostCurrency"
-                  className="ims-field-input"
-                  value={form.standardCostCurrency}
-                  onChange={(e) =>
-                    handleChange("standardCostCurrency", e.target.value)
-                  }
-                >
-                  <option value="GBP">GBP</option>
-                  <option value="EUR">EUR</option>
-                  <option value="USD">USD</option>
-                </select>
-              </div>
-            </div>
+        <div className="ims-field-row">
+          <div className="ims-field">
+            <label className="ims-field-label" htmlFor="quantity">
+              Quantity in stock
+            </label>
+            <input
+              id="quantity"
+              type="number"
+              step="1"
+              className="ims-field-input"
+              value={form.quantity}
+              onChange={(e) => handleChange("quantity", e.target.value)}
+            />
           </div>
-
-          <div className="ims-form-section card">
-            <h2 className="ims-form-section-title">Replenishment</h2>
-            <p className="ims-form-section-subtitle">
-              Configure thresholds for low-stock alerts and typical order size.
-            </p>
-
-            <div className="ims-field-row">
-              <div className="ims-field">
-                <label className="ims-field-label" htmlFor="reorderLevel">
-                  Reorder level
-                </label>
-                <input
-                  id="reorderLevel"
-                  type="number"
-                  min="0"
-                  className="ims-field-input"
-                  value={form.reorderLevel}
-                  onChange={(e) =>
-                    handleChange("reorderLevel", e.target.value)
-                  }
-                />
-                <p className="ims-field-help">
-                  When on-hand stock falls below this quantity the item will be
-                  marked as low stock.
-                </p>
-              </div>
-              <div className="ims-field">
-                <label className="ims-field-label" htmlFor="reorderQuantity">
-                  Typical reorder quantity
-                </label>
-                <input
-                  id="reorderQuantity"
-                  type="number"
-                  min="0"
-                  className="ims-field-input"
-                  value={form.reorderQuantity}
-                  onChange={(e) =>
-                    handleChange("reorderQuantity", e.target.value)
-                  }
-                />
-              </div>
-            </div>
+          <div className="ims-field">
+            <label className="ims-field-label" htmlFor="standardCost">
+              Cost price (GBP)<span className="ims-required">*</span>
+            </label>
+            <input
+              id="standardCost"
+              type="number"
+              min="0"
+              step="0.01"
+              className="ims-field-input"
+              value={form.standardCost}
+              onChange={(e) => handleChange("standardCost", e.target.value)}
+            />
           </div>
+        </div>
 
-          <div className="ims-form-section card">
-            <h2 className="ims-form-section-title">Lifecycle & integrations</h2>
-            <p className="ims-form-section-subtitle">
-              Control availability and link this item to external systems.
-            </p>
-
-            <div className="ims-field-row">
-              <div className="ims-field">
-                <label className="ims-field-label" htmlFor="status">
-                  Status
-                </label>
-                <select
-                  id="status"
-                  className="ims-field-input"
-                  value={form.status}
-                  onChange={(e) =>
-                    handleChange(
-                      "status",
-                      e.target.value as "active" | "discontinued",
-                    )
-                  }
-                >
-                  <option value="active">Active</option>
-                  <option value="discontinued">Discontinued</option>
-                </select>
-              </div>
-              <div className="ims-field">
-                <label
-                  className="ims-field-label"
-                  htmlFor="usefulLifeMonths"
-                >
-                  Useful life (months)
-                </label>
-                <input
-                  id="usefulLifeMonths"
-                  type="number"
-                  min="0"
-                  className="ims-field-input"
-                  value={form.usefulLifeMonths}
-                  onChange={(e) =>
-                    handleChange("usefulLifeMonths", e.target.value)
-                  }
-                />
-                <p className="ims-field-help">
-                  Used later for DAAS depreciation schedules.
-                </p>
-              </div>
-            </div>
-
-            <div className="ims-field">
-              <label className="ims-field-label" htmlFor="hubspotProductId">
-                HubSpot product ID
-              </label>
-              <input
-                id="hubspotProductId"
-                type="text"
-                className="ims-field-input"
-                value={form.hubspotProductId}
-                onChange={(e) =>
-                  handleChange("hubspotProductId", e.target.value)
-                }
-              />
-            </div>
-
-            <div className="ims-field">
-              <label className="ims-field-label" htmlFor="xeroItemCode">
-                Xero item code
-              </label>
-              <input
-                id="xeroItemCode"
-                type="text"
-                className="ims-field-input"
-                value={form.xeroItemCode}
-                onChange={(e) =>
-                  handleChange("xeroItemCode", e.target.value)
-                }
-              />
-            </div>
+          <div className="ims-field">
+            <label className="ims-field-label" htmlFor="usefulLifeMonths">
+              Useful life (months)
+            </label>
+            <input
+              id="usefulLifeMonths"
+              type="number"
+              min="0"
+              className="ims-field-input"
+              value={form.usefulLifeMonths}
+              onChange={(e) => handleChange("usefulLifeMonths", e.target.value)}
+            />
           </div>
-        </section>
+        </fieldset>
       </form>
 
       {error && <p className="ims-form-error">{error}</p>}

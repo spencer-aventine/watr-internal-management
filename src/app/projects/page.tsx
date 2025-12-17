@@ -13,8 +13,6 @@ import { db } from "@/lib/firebase";
 import {
   collection,
   getDocs,
-  getDoc,
-  addDoc,
   updateDoc,
   doc,
   query,
@@ -24,22 +22,14 @@ import {
   increment,
 } from "firebase/firestore";
 import { createOrUpdateProductTracking } from "@/lib/productTracking";
-
-type ItemOption = {
-  id: string;
-  name: string;
-  sku: string;
-  mustHaveName?: string | null;
-};
-
-type ProjectItemLine = {
-  itemId: string;
-  itemName: string;
-  qty: number;
-  mustHaveItemId?: string | null;
-  mustHaveItemName?: string | null;
-  mustHaveQty?: number | null;
-};
+import {
+  ProjectItemCategory,
+  PROJECT_ITEM_LABELS,
+  ProjectItemLine,
+  ProjectItemsByType,
+  parseProjectItems,
+  flattenProjectItems,
+} from "./_projectItemUtils";
 
 type ProjectStatus = "reserved" | "wip" | "complete";
 
@@ -49,38 +39,21 @@ type Project = {
   status: ProjectStatus;
   hubspotDealId?: string | null;
   items: ProjectItemLine[];
+  itemsByType: ProjectItemsByType;
   createdAt?: Timestamp;
   updatedAt?: Timestamp;
   completedAt?: Timestamp | null;
 };
 
-type NewLineState = {
-  id: string;
-  itemId: string;
-  qty: string;
-  mustHaveItemId?: string | null;
-  mustHaveLabel?: string;
-  mustHaveQty: string;
-};
 
 export default function ProjectsWipPage() {
   const router = useRouter();
 
-  const [items, setItems] = useState<ItemOption[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
-  const [savingProject, setSavingProject] = useState(false);
   const [moving, setMoving] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
-
-  // New project form state
-  const [showNewForm, setShowNewForm] = useState(false);
-  const [newName, setNewName] = useState("");
-  const [newDealId, setNewDealId] = useState("");
-  const [newLines, setNewLines] = useState<NewLineState[]>([
-    { id: "line-1", itemId: "", qty: "", mustHaveQty: "" },
-  ]);
 
   // Search (by name or HubSpot project ID)
   const [search, setSearch] = useState("");
@@ -95,51 +68,21 @@ export default function ProjectsWipPage() {
     setLoading(true);
     setError(null);
     try {
-      // Load items for selectors
-      const itemsSnap = await getDocs(
-        query(collection(db, "items"), orderBy("name")),
-      );
-      const itemOptions: ItemOption[] = itemsSnap.docs.map((d) => {
-        const data = d.data() as any;
-        return {
-          id: d.id,
-          name: data.name ?? "",
-          sku: data.sku ?? "",
-          mustHaveName: data.mustHave ?? null,
-        };
-      });
-      setItems(itemOptions);
-
       // Load projects
       const projectsSnap = await getDocs(
         query(collection(db, "projects"), orderBy("createdAt", "desc")),
       );
-        const projRows: Project[] = projectsSnap.docs.map((d) => {
-          const data = d.data() as any;
-          return {
-            id: d.id,
-            name: data.name ?? "",
-          status:
-            (data.status as ProjectStatus) ??
-            "reserved",
+      const projRows: Project[] = projectsSnap.docs.map((d) => {
+        const data = d.data() as any;
+        const structuredItems = parseProjectItems(data);
+        const flattenedItems = flattenProjectItems(structuredItems);
+        return {
+          id: d.id,
+          name: data.name ?? "",
+          status: (data.status as ProjectStatus) ?? "reserved",
           hubspotDealId: data.hubspotDealId ?? null,
-          items: Array.isArray(data.items)
-            ? data.items.map((it: any) => ({
-                itemId: it.itemId,
-                itemName: it.itemName,
-                qty: Number(it.qty) || 0,
-                mustHaveItemId:
-                  typeof it.mustHaveItemId === "string"
-                    ? it.mustHaveItemId
-                    : null,
-                mustHaveItemName:
-                  typeof it.mustHaveItemName === "string"
-                    ? it.mustHaveItemName
-                    : null,
-                mustHaveQty:
-                  typeof it.mustHaveQty === "number" ? it.mustHaveQty : null,
-              }))
-            : [],
+          items: flattenedItems,
+          itemsByType: structuredItems,
           createdAt: data.createdAt,
           updatedAt: data.updatedAt,
           completedAt: data.completedAt ?? null,
@@ -171,185 +114,11 @@ export default function ProjectsWipPage() {
           line.itemName,
           line.qty || 0,
           completedAt,
+          line.itemType,
         );
       }),
     );
   };
-
-  const handleAddLine = () => {
-    setNewLines((prev) => [
-      ...prev,
-      {
-        id: `line-${Date.now()}`,
-        itemId: "",
-        qty: "",
-        mustHaveQty: "",
-      },
-    ]);
-  };
-
-  const handleRemoveLine = (lineId: string) => {
-    setNewLines((prev) => prev.filter((l) => l.id !== lineId));
-  };
-
-  const handleLineItemChange = (lineId: string, itemId: string) => {
-    setNewLines((prev) =>
-      prev.map((l) => {
-        if (l.id !== lineId) return l;
-
-        const item = items.find((i) => i.id === itemId);
-
-        let mustHaveItemId: string | null = null;
-        let mustHaveLabel: string | undefined;
-
-        if (item?.mustHaveName) {
-          const mustItem = items.find((i) => i.name === item.mustHaveName);
-          if (mustItem) {
-            mustHaveItemId = mustItem.id;
-            mustHaveLabel = `${mustItem.name} (must have)`;
-          }
-        }
-
-        return {
-          ...l,
-          itemId,
-          mustHaveItemId,
-          mustHaveLabel,
-          mustHaveQty: mustHaveItemId ? l.mustHaveQty || l.qty || "1" : "",
-        };
-      }),
-    );
-  };
-
-  const handleLineQtyChange = (lineId: string, qty: string) => {
-    setNewLines((prev) =>
-      prev.map((l) => (l.id === lineId ? { ...l, qty } : l)),
-    );
-  };
-
-  const handleLineMustHaveQtyChange = (lineId: string, qty: string) => {
-    setNewLines((prev) =>
-      prev.map((l) => (l.id === lineId ? { ...l, mustHaveQty: qty } : l)),
-    );
-  };
-
-  /**
-   * Create a new project.
-   * - Starts in "reserved".
-   * - Inventory is reduced and moved into reserved.
-   */
-  const handleCreateProject = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newName.trim()) {
-      setError("Project name is required.");
-      return;
-    }
-
-    const validLines = newLines.filter(
-      (l) => l.itemId && Number(l.qty) > 0,
-    );
-    if (!validLines.length) {
-      setError("Add at least one product with a quantity.");
-      return;
-    }
-
-    setSavingProject(true);
-    setError(null);
-    setMessage(null);
-
-    try {
-      const now = Timestamp.now();
-
-      // Build items array for project doc (no undefineds)
-      const itemsForProject: ProjectItemLine[] = validLines.map((l) => {
-        const item = items.find((i) => i.id === l.itemId);
-        const mustItem =
-          l.mustHaveItemId != null
-            ? items.find((i) => i.id === l.mustHaveItemId)
-            : undefined;
-
-        const qty = Number(l.qty);
-        const mustQty =
-          l.mustHaveItemId && l.mustHaveQty
-            ? Number(l.mustHaveQty)
-            : null;
-
-        return {
-          itemId: l.itemId,
-          itemName: item?.name ?? "",
-          qty,
-          mustHaveItemId: l.mustHaveItemId ?? null,
-          mustHaveItemName: mustItem?.name ?? null,
-          mustHaveQty: mustQty,
-        };
-      });
-
-      // Prepare doc payload explicitly without undefined
-      const projectDoc = {
-        name: newName.trim(),
-        status: "reserved" as const,
-        hubspotDealId: newDealId.trim() || null,
-        items: itemsForProject.map((line) => ({
-          itemId: line.itemId,
-          itemName: line.itemName,
-          qty: line.qty,
-          ...(line.mustHaveItemId
-            ? { mustHaveItemId: line.mustHaveItemId }
-            : {}),
-          ...(line.mustHaveItemName
-            ? { mustHaveItemName: line.mustHaveItemName }
-            : {}),
-          ...(typeof line.mustHaveQty === "number" && line.mustHaveQty > 0
-            ? { mustHaveQty: line.mustHaveQty }
-            : {}),
-        })),
-        createdAt: now,
-        updatedAt: now,
-      };
-
-      // Create project doc
-      await addDoc(collection(db, "projects"), projectDoc);
-
-      // Update item inventory / reserved
-      const batch = writeBatch(db);
-
-      itemsForProject.forEach((line) => {
-        if (!line.itemId || !line.qty) return;
-        const itemRef = doc(db, "items", line.itemId);
-        batch.update(itemRef, {
-          inventoryQty: increment(-line.qty), // inventory = in warehouse
-          reservedQty: increment(line.qty),   // reserved for this project
-          updatedAt: now,
-        });
-
-        if (line.mustHaveItemId && line.mustHaveQty && line.mustHaveQty > 0) {
-          const mustRef = doc(db, "items", line.mustHaveItemId);
-          batch.update(mustRef, {
-            inventoryQty: increment(-line.mustHaveQty),
-            reservedQty: increment(line.mustHaveQty),
-            updatedAt: now,
-          });
-        }
-      });
-
-      await batch.commit();
-
-      setMessage("Project created, inventory reserved and stock updated.");
-      setNewName("");
-      setNewDealId("");
-      setNewLines([{ id: "line-1", itemId: "", qty: "", mustHaveQty: "" }]);
-      setShowNewForm(false);
-
-      // Reload projects & items
-      await loadData();
-    } catch (err: any) {
-      console.error("Error creating project", err);
-      setError(err?.message ?? "Error creating project");
-    } finally {
-      setSavingProject(false);
-    }
-  };
-
   /**
    * Move project between Reserved / WIP / Complete.
    *
@@ -620,9 +389,9 @@ export default function ProjectsWipPage() {
           <button
             type="button"
             className="ims-primary-button"
-            onClick={() => setShowNewForm((v) => !v)}
+            onClick={() => router.push("/projects/new")}
           >
-            {showNewForm ? "Close new project" : "+ New project"}
+            + New project
           </button>
         </div>
       </section>
@@ -663,185 +432,11 @@ export default function ProjectsWipPage() {
               </span>
             </header>
 
-            {showNewForm && (
-              <div className="ims-kanban-card card ims-kanban-card--new">
-                <h3 className="ims-form-section-title">New project</h3>
-                <p className="ims-form-section-subtitle">
-                  Set up a project, link to products and optionally a HubSpot
-                  deal. Inventory is reserved immediately.
-                </p>
-
-                <form
-                  onSubmit={handleCreateProject}
-                  className="ims-new-project-form"
-                >
-                  <div className="ims-field">
-                    <label className="ims-field-label" htmlFor="projName">
-                      Project name<span className="ims-required">*</span>
-                    </label>
-                    <input
-                      id="projName"
-                      className="ims-field-input"
-                      value={newName}
-                      onChange={(e) => setNewName(e.target.value)}
-                    />
-                  </div>
-
-                  <div className="ims-field">
-                    <label className="ims-field-label" htmlFor="dealId">
-                      HubSpot Project ID
-                    </label>
-                    <input
-                      id="dealId"
-                      className="ims-field-input"
-                      value={newDealId}
-                      onChange={(e) => setNewDealId(e.target.value)}
-                      placeholder="Optional"
-                    />
-                  </div>
-
-                  <hr className="ims-form-divider" />
-
-                  <div className="ims-field">
-                    <div className="ims-form-section-title">
-                      Products in this project
-                    </div>
-                    <p className="ims-form-section-subtitle">
-                      Choose one or more products. If a product has a
-                      &quot;must have&quot; item, we&apos;ll pull it in
-                      automatically so you can set quantities for both.
-                    </p>
-                  </div>
-
-                  {newLines.map((line, index) => (
-                    <div
-                      key={line.id}
-                      className="ims-field ims-project-line"
-                    >
-                      <div className="ims-field-row">
-                        <div className="ims-field">
-                          <label className="ims-field-label">
-                            Product {index + 1}
-                          </label>
-                          <select
-                            className="ims-field-input"
-                            value={line.itemId}
-                            onChange={(e) =>
-                              handleLineItemChange(
-                                line.id,
-                                e.target.value,
-                              )
-                            }
-                          >
-                            <option value="">Select a product…</option>
-                            {items.map((item) => (
-                              <option key={item.id} value={item.id}>
-                                {item.name} ({item.sku})
-                              </option>
-                            ))}
-                          </select>
-                        </div>
-                        <div className="ims-field">
-                          <label className="ims-field-label">
-                            Quantity
-                          </label>
-                          <input
-                            type="number"
-                            min={1}
-                            className="ims-field-input"
-                            value={line.qty}
-                            onChange={(e) =>
-                              handleLineQtyChange(
-                                line.id,
-                                e.target.value,
-                              )
-                            }
-                          />
-                        </div>
-                      </div>
-
-                      {line.mustHaveItemId && line.mustHaveLabel && (
-                        <div className="ims-field-row">
-                          <div className="ims-field">
-                            <label className="ims-field-label">
-                              {line.mustHaveLabel}
-                            </label>
-                            <div className="ims-field-help">
-                              This product is required whenever the main
-                              product is used.
-                            </div>
-                          </div>
-                          <div className="ims-field">
-                            <label className="ims-field-label">
-                              Required quantity
-                            </label>
-                            <input
-                              type="number"
-                              min={1}
-                              className="ims-field-input"
-                              value={line.mustHaveQty}
-                              onChange={(e) =>
-                                handleLineMustHaveQtyChange(
-                                  line.id,
-                                  e.target.value,
-                                )
-                              }
-                            />
-                          </div>
-                        </div>
-                      )}
-
-                      {newLines.length > 1 && (
-                        <button
-                          type="button"
-                          className="ims-secondary-button ims-project-line-remove"
-                          onClick={() => handleRemoveLine(line.id)}
-                        >
-                          Remove line
-                        </button>
-                      )}
-                    </div>
-                  ))}
-
-                  <button
-                    type="button"
-                    className="ims-secondary-button"
-                    onClick={handleAddLine}
-                    style={{ marginTop: "0.5rem" }}
-                  >
-                    + Add product line
-                  </button>
-
-                  <div
-                    style={{
-                      marginTop: "0.75rem",
-                      display: "flex",
-                      justifyContent: "flex-end",
-                      gap: "0.5rem",
-                    }}
-                  >
-                    <button
-                      type="button"
-                      className="ims-secondary-button"
-                      onClick={() => {
-                        setShowNewForm(false);
-                      }}
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      type="submit"
-                      className="ims-primary-button"
-                      disabled={savingProject}
-                    >
-                      {savingProject ? "Creating…" : "Create project"}
-                    </button>
-                  </div>
-                </form>
-              </div>
-            )}
-
-            {reservedProjects.map((project) => (
+            {reservedProjects.map((project) => {
+              const visibleItems = project.items.filter(
+                (line) => line.itemType !== "sensorExtras",
+              );
+              return (
               <article
                 key={project.id}
                 className="ims-kanban-card card"
@@ -867,13 +462,13 @@ export default function ProjectsWipPage() {
                 </header>
 
                 <div className="ims-kanban-card-body">
-                  {project.items.length === 0 ? (
+                  {visibleItems.length === 0 ? (
                     <p className="ims-kanban-card-empty">
-                      No products linked.
+                      No inventory linked.
                     </p>
                   ) : (
                     <ul className="ims-kanban-products">
-                      {project.items.map((line, idx) => (
+                      {visibleItems.map((line, idx) => (
                         <li key={idx}>
                           <span className="ims-kanban-product-main">
                             {line.qty} × {line.itemName}
@@ -884,6 +479,10 @@ export default function ProjectsWipPage() {
                               {line.mustHaveItemName}
                             </span>
                           )}
+                          <span className="ims-kanban-product-type">
+                            {PROJECT_ITEM_LABELS[line.itemType] ??
+                              "Item"}
+                          </span>
                         </li>
                       ))}
                     </ul>
@@ -899,9 +498,10 @@ export default function ProjectsWipPage() {
                   </span>
                 </footer>
               </article>
-            ))}
+            );
+            })}
 
-            {!showNewForm && reservedProjects.length === 0 && (
+            {reservedProjects.length === 0 && (
               <p className="ims-table-empty">
                 No reserved projects. Create one to start tracking stock.
               </p>
@@ -927,65 +527,74 @@ export default function ProjectsWipPage() {
               </span>
             </header>
 
-            {wipProjects.map((project) => (
-              <article
-                key={project.id}
-                className="ims-kanban-card card"
-                role="button"
-                tabIndex={0}
-                draggable
-                onClick={() => handleCardClick(project.id)}
-                onKeyDown={(e) => handleCardKeyDown(e, project.id)}
-                onDragStart={(e) => handleCardDragStart(e, project.id)}
-                onDragEnd={handleCardDragEnd}
-              >
-                <header className="ims-kanban-card-header">
-                  <div>
-                    <h3 className="ims-kanban-card-title">
-                      {project.name}
-                    </h3>
-                    {project.hubspotDealId && (
-                      <p className="ims-kanban-card-subtitle">
-                        Project ID: {project.hubspotDealId}
+            {wipProjects.map((project) => {
+              const visibleItems = project.items.filter(
+                (line) => line.itemType !== "sensorExtras",
+              );
+              return (
+                <article
+                  key={project.id}
+                  className="ims-kanban-card card"
+                  role="button"
+                  tabIndex={0}
+                  draggable
+                  onClick={() => handleCardClick(project.id)}
+                  onKeyDown={(e) => handleCardKeyDown(e, project.id)}
+                  onDragStart={(e) => handleCardDragStart(e, project.id)}
+                  onDragEnd={handleCardDragEnd}
+                >
+                  <header className="ims-kanban-card-header">
+                    <div>
+                      <h3 className="ims-kanban-card-title">
+                        {project.name}
+                      </h3>
+                      {project.hubspotDealId && (
+                        <p className="ims-kanban-card-subtitle">
+                          Project ID: {project.hubspotDealId}
+                        </p>
+                      )}
+                    </div>
+                  </header>
+
+                  <div className="ims-kanban-card-body">
+                    {visibleItems.length === 0 ? (
+                      <p className="ims-kanban-card-empty">
+                        No inventory linked.
                       </p>
+                    ) : (
+                      <ul className="ims-kanban-products">
+                        {visibleItems.map((line, idx) => (
+                          <li key={idx}>
+                            <span className="ims-kanban-product-main">
+                              {line.qty} × {line.itemName}
+                            </span>
+                            {line.mustHaveItemName && line.mustHaveQty && (
+                              <span className="ims-kanban-product-secondary">
+                                + {line.mustHaveQty} ×{" "}
+                                {line.mustHaveItemName}
+                              </span>
+                            )}
+                            <span className="ims-kanban-product-type">
+                              {PROJECT_ITEM_LABELS[line.itemType] ??
+                                "Item"}
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
                     )}
                   </div>
-                </header>
 
-                <div className="ims-kanban-card-body">
-                  {project.items.length === 0 ? (
-                    <p className="ims-kanban-card-empty">
-                      No products linked.
-                    </p>
-                  ) : (
-                    <ul className="ims-kanban-products">
-                      {project.items.map((line, idx) => (
-                        <li key={idx}>
-                          <span className="ims-kanban-product-main">
-                            {line.qty} × {line.itemName}
-                          </span>
-                          {line.mustHaveItemName && line.mustHaveQty && (
-                            <span className="ims-kanban-product-secondary">
-                              + {line.mustHaveQty} ×{" "}
-                              {line.mustHaveItemName}
-                            </span>
-                          )}
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </div>
-
-                <footer className="ims-kanban-card-footer">
-                  <span
-                    className="ims-table-empty"
-                    style={{ fontSize: "0.75rem" }}
-                  >
-                    Drag to &quot;Complete&quot; when this project is finished.
-                  </span>
-                </footer>
-              </article>
-            ))}
+                  <footer className="ims-kanban-card-footer">
+                    <span
+                      className="ims-table-empty"
+                      style={{ fontSize: "0.75rem" }}
+                    >
+                      Drag to &quot;Complete&quot; when this project is finished.
+                    </span>
+                  </footer>
+                </article>
+              );
+            })}
 
             {wipProjects.length === 0 && (
               <p className="ims-table-empty">
@@ -1015,65 +624,74 @@ export default function ProjectsWipPage() {
               </span>
             </header>
 
-            {completedProjects.map((project) => (
-              <article
-                key={project.id}
-                className="ims-kanban-card card ims-kanban-card--complete"
-                role="button"
-                tabIndex={0}
-                draggable
-                onClick={() => handleCardClick(project.id)}
-                onKeyDown={(e) => handleCardKeyDown(e, project.id)}
-                onDragStart={(e) => handleCardDragStart(e, project.id)}
-                onDragEnd={handleCardDragEnd}
-              >
-                <header className="ims-kanban-card-header">
-                  <div>
-                    <h3 className="ims-kanban-card-title">
-                      {project.name}
-                    </h3>
-                    {project.hubspotDealId && (
-                      <p className="ims-kanban-card-subtitle">
-                        Project ID: {project.hubspotDealId}
+            {completedProjects.map((project) => {
+              const visibleItems = project.items.filter(
+                (line) => line.itemType !== "sensorExtras",
+              );
+              return (
+                <article
+                  key={project.id}
+                  className="ims-kanban-card card ims-kanban-card--complete"
+                  role="button"
+                  tabIndex={0}
+                  draggable
+                  onClick={() => handleCardClick(project.id)}
+                  onKeyDown={(e) => handleCardKeyDown(e, project.id)}
+                  onDragStart={(e) => handleCardDragStart(e, project.id)}
+                  onDragEnd={handleCardDragEnd}
+                >
+                  <header className="ims-kanban-card-header">
+                    <div>
+                      <h3 className="ims-kanban-card-title">
+                        {project.name}
+                      </h3>
+                      {project.hubspotDealId && (
+                        <p className="ims-kanban-card-subtitle">
+                          Project ID: {project.hubspotDealId}
+                        </p>
+                      )}
+                    </div>
+                  </header>
+
+                  <div className="ims-kanban-card-body">
+                    {visibleItems.length === 0 ? (
+                      <p className="ims-kanban-card-empty">
+                        No inventory linked.
                       </p>
+                    ) : (
+                      <ul className="ims-kanban-products">
+                        {visibleItems.map((line, idx) => (
+                          <li key={idx}>
+                            <span className="ims-kanban-product-main">
+                              {line.qty} × {line.itemName}
+                            </span>
+                            {line.mustHaveItemName && line.mustHaveQty && (
+                              <span className="ims-kanban-product-secondary">
+                                + {line.mustHaveQty} ×{" "}
+                                {line.mustHaveItemName}
+                              </span>
+                            )}
+                            <span className="ims-kanban-product-type">
+                              {PROJECT_ITEM_LABELS[line.itemType] ??
+                                "Item"}
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
                     )}
                   </div>
-                </header>
 
-                <div className="ims-kanban-card-body">
-                  {project.items.length === 0 ? (
-                    <p className="ims-kanban-card-empty">
-                      No products linked.
-                    </p>
-                  ) : (
-                    <ul className="ims-kanban-products">
-                      {project.items.map((line, idx) => (
-                        <li key={idx}>
-                          <span className="ims-kanban-product-main">
-                            {line.qty} × {line.itemName}
-                          </span>
-                          {line.mustHaveItemName && line.mustHaveQty && (
-                            <span className="ims-kanban-product-secondary">
-                              + {line.mustHaveQty} ×{" "}
-                              {line.mustHaveItemName}
-                            </span>
-                          )}
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </div>
-
-                <footer className="ims-kanban-card-footer">
-                  <span
-                    className="ims-table-empty"
-                    style={{ fontSize: "0.75rem" }}
-                  >
-                    Drag back if this project reopens.
-                  </span>
-                </footer>
-              </article>
-            ))}
+                  <footer className="ims-kanban-card-footer">
+                    <span
+                      className="ims-table-empty"
+                      style={{ fontSize: "0.75rem" }}
+                    >
+                      Drag back if this project reopens.
+                    </span>
+                  </footer>
+                </article>
+              );
+            })}
 
             {completedProjects.length === 0 && (
               <p className="ims-table-empty">

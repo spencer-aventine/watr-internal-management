@@ -12,6 +12,7 @@ import {
   Timestamp,
   query,
   orderBy,
+  deleteDoc,
 } from "firebase/firestore";
 import {
   getInventoryDetailPath,
@@ -20,14 +21,15 @@ import {
 
 type FirestoreItem = {
   id: string;
-  sku: string;
   name: string;
   itemType?: string;
-  category?: string | null;
-  standardCost?: number;
-  salesPrice?: number;
+  supplier1?: string;
+  supplier2?: string;
+  shortCode?: string;
+  pricePerUnit?: number;
+  quantity?: number;
+  totalCost?: number;
   status?: string;
-  environment?: string; // Salt / Fresh from CSV
 };
 
 type CsvRow = {
@@ -35,23 +37,26 @@ type CsvRow = {
 };
 
 type ImportRow = {
-  sku: string;
   name: string;
-  mustHave?: string;
-  environment?: string;
-  standardCost: number;
-  salesPrice?: number;
-  rawItemType?: string;
+  type: string;
+  supplier1: string;
+  supplier2: string;
+  shortCode: string;
+  pricePerUnit: number;
+  quantity: number;
+  totalCost: number;
 };
 
 // Keys used in the table — update this union + allColumns to add/remove columns
 type ColumnKey =
-  | "sku"
   | "name"
   | "itemType"
-  | "standardCost"
-  | "salesPrice"
-  | "environment"
+  | "supplier1"
+  | "supplier2"
+  | "shortCode"
+  | "pricePerUnit"
+  | "quantity"
+  | "totalCost"
   | "status";
 
 type ColumnConfig = {
@@ -59,47 +64,91 @@ type ColumnConfig = {
   label: string;
 };
 
-type TabKey = "products" | "subAssemblies" | "components";
+type TabKey =
+  | "all"
+  | "products"
+  | "subAssemblies"
+  | "components"
+  | "sensors"
+  | "sensorExtras";
 
 const tabOptions: { key: TabKey; label: string }[] = [
+  { key: "all", label: "All items" },
   { key: "products", label: "Products" },
   { key: "subAssemblies", label: "Sub-assemblies" },
   { key: "components", label: "Components" },
+  { key: "sensors", label: "Sensors" },
+  { key: "sensorExtras", label: "Sensor extras" },
 ];
+
+const creationTabOptions = tabOptions.filter(
+  (tab): tab is { key: Exclude<TabKey, "all">; label: string } =>
+    tab.key !== "all",
+);
+
+const createPaths: Record<Exclude<TabKey, "all">, string> = {
+  products: "/inventory/new?type=products",
+  subAssemblies: "/inventory/sub-assemblies/new",
+  components: "/inventory/new?type=components",
+  sensors: "/inventory/new?type=sensors",
+  sensorExtras: "/inventory/new?type=sensorExtras",
+};
 
 // Single source of truth for columns
 const allColumns: ColumnConfig[] = [
-  { key: "sku", label: "SKU" },
   { key: "name", label: "Name" },
   { key: "itemType", label: "Type" },
-  { key: "standardCost", label: "Standard cost" },
-  { key: "salesPrice", label: "Sales price" },
-  { key: "environment", label: "Environment" },
+  { key: "supplier1", label: "Supplier 1" },
+  { key: "supplier2", label: "Supplier 2" },
+  { key: "shortCode", label: "Short code" },
+  { key: "pricePerUnit", label: "Price per unit" },
+  { key: "quantity", label: "Qty" },
+  { key: "totalCost", label: "Total cost" },
   { key: "status", label: "Status" },
 ];
 
-const matchesTab = (item: FirestoreItem, tab: TabKey) => {
+const getTabKeyForItem = (item: FirestoreItem): TabKey => {
   const type = normalizeItemType(item.itemType);
-  switch (tab) {
-    case "products":
-      return type === "product" || type === "products";
-    case "subAssemblies":
-      return (
-        type === "sub assembly" ||
-        type === "sub assemblies" ||
-        type === "subassembly"
-      );
-    case "components":
-      return type === "component" || type === "components" || type === "";
-    default:
-      return false;
+
+  if (
+    type === "product" ||
+    type === "products" ||
+    type === "unit" ||
+    type === "finished good"
+  ) {
+    return "products";
   }
+
+  if (
+    type === "sub assembly" ||
+    type === "sub assemblies" ||
+    type === "subassembly"
+  ) {
+    return "subAssemblies";
+  }
+
+  if (type === "sensor" || type === "sensors" || type === "data") {
+    return "sensors";
+  }
+
+  if (type === "sensor extra" || type === "sensor extras") {
+    return "sensorExtras";
+  }
+
+  return "components";
 };
 
+const matchesTab = (item: FirestoreItem, tab: TabKey) =>
+  getTabKeyForItem(item) === tab;
+
 const mapCsvRow = (row: CsvRow): ImportRow | null => {
-  const sku = String(row["*ItemCode"] ?? "").trim();
-  const name = String(row["ItemName"] ?? "").trim();
-  if (!sku || !name) return null;
+  const name = String(row["Name"] ?? "").trim();
+  const typeValue = String(row["Type"] ?? "component").trim();
+  const type = typeValue || "component";
+  const supplier1 = String(row["Supplier 1"] ?? "").trim();
+  const supplier2 = String(row["Supplier 2"] ?? "").trim();
+  const shortCode = String(row["ShortCode"] ?? "").trim();
+  if (!name) return null;
 
   const parseNumber = (value: any): number => {
     if (value == null) return 0;
@@ -109,25 +158,26 @@ const mapCsvRow = (row: CsvRow): ImportRow | null => {
   };
 
   return {
-    sku,
     name,
-    mustHave: row["Must Have"] || "",
-    environment: row["Salt / Fresh"] || "",
-    standardCost: parseNumber(row["PurchasesUnitPrice"]),
-    salesPrice: parseNumber(row["SalesUnitPrice"]),
-    rawItemType: row["Item"] || "",
+    type,
+    supplier1,
+    supplier2,
+    shortCode,
+    pricePerUnit: parseNumber(row["Price per unit"]),
+    quantity: parseNumber(row["Qty"]),
+    totalCost: parseNumber(row["Total cost"]),
   };
 };
 
 export default function InventoryPage() {
-  const [products, setProducts] = useState<FirestoreItem[]>([]);
+  const [items, setItems] = useState<FirestoreItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [importPreview, setImportPreview] = useState<ImportRow[]>([]);
   const [importing, setImporting] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const [activeTab, setActiveTab] = useState<TabKey>("components");
+  const [activeTab, setActiveTab] = useState<TabKey>("all");
   // Table filtering
   const [filterText, setFilterText] = useState("");
   // Column visibility
@@ -140,42 +190,52 @@ export default function InventoryPage() {
     allColumns.map((c) => c.key),
   );
 
-  const loadProducts = async () => {
+  const loadItems = async () => {
     setLoading(true);
     setError(null);
     try {
       const ref = collection(db, "items");
-      const q = query(ref, orderBy("sku"));
+      const q = query(ref, orderBy("name"));
       const snapshot = await getDocs(q);
         const rows: FirestoreItem[] = snapshot.docs.map((doc) => {
           const data = doc.data() as any;
           return {
             id: doc.id,
-            sku: data.sku ?? "",
             name: data.name ?? "",
             itemType: data.itemType ?? data.rawCsvItemType ?? "",
-            category: data.category ?? null,
-          standardCost:
-            typeof data.standardCost === "number"
-              ? data.standardCost
-              : undefined,
-          salesPrice:
-            typeof data.salesPrice === "number" ? data.salesPrice : undefined,
-          status: data.status ?? "active",
-          environment: data.saltFresh ?? data.environment ?? "",
-        };
-      });
-      setProducts(rows);
+            supplier1: data.supplier1 ?? "",
+            supplier2: data.supplier2 ?? "",
+            shortCode: data.shortCode ?? data.sku ?? "",
+            pricePerUnit:
+              typeof data.pricePerUnit === "number"
+                ? data.pricePerUnit
+                : typeof data.standardCost === "number"
+                  ? data.standardCost
+                  : undefined,
+            quantity:
+              typeof data.quantity === "number"
+                ? data.quantity
+                : typeof data.inventoryQty === "number"
+                  ? data.inventoryQty
+                  : undefined,
+            totalCost:
+              typeof data.totalCost === "number"
+                ? data.totalCost
+                : undefined,
+            status: data.status ?? "active",
+          };
+        });
+      setItems(rows);
     } catch (err: any) {
-      console.error("Error loading products", err);
-      setError(err?.message ?? "Error loading products");
+      console.error("Error loading items", err);
+      setError(err?.message ?? "Error loading items");
     } finally {
       setLoading(false);
     }
   };
 
   useEffect(() => {
-    loadProducts();
+    loadItems();
   }, []);
 
   const handleFileChange = (e: ChangeEvent<HTMLInputElement>) => {
@@ -215,54 +275,49 @@ export default function InventoryPage() {
 
     try {
       const now = Timestamp.now();
+      const itemsRef = collection(db, "items");
+      const existingSnapshot = await getDocs(itemsRef);
+      await Promise.all(existingSnapshot.docs.map((doc) => deleteDoc(doc.ref)));
 
       for (const row of importPreview) {
-        await addDoc(collection(db, "items"), {
-          sku: row.sku,
+        const itemType = row.type || "component";
+        const totalCost =
+          row.totalCost > 0
+            ? row.totalCost
+            : row.pricePerUnit * (row.quantity || 0);
+
+        await addDoc(itemsRef, {
+          sku: row.shortCode || row.name,
+          shortCode: row.shortCode || row.name,
           name: row.name,
           shortName: row.name,
           description: null,
-
-          // Categories: you can update this later to map to real category IDs
-          primaryCategoryId: "uncategorised",
-          subCategoryIds: [],
-
-          itemType: "component",
-          rawCsvItemType: row.rawItemType ?? "",
-          trackSerialNumber: false,
+          supplier1: row.supplier1 || null,
+          supplier2: row.supplier2 || null,
+          itemType,
+          rawCsvItemType: row.type || "",
           unitOfMeasure: "ea",
-
           status: "active",
-          dateIntroduced: now,
-          dateDiscontinued: null,
-
-          standardCost: row.standardCost,
+          pricePerUnit: row.pricePerUnit,
+          standardCost: row.pricePerUnit,
           standardCostCurrency: "GBP",
-          reorderLevel: null,
-          reorderQuantity: null,
-
-          usefulLifeMonths: null,
-
-          // Extra fields from CSV
-          mustHave: row.mustHave || null,
-          saltFresh: row.environment || null,
-          salesPrice: row.salesPrice ?? null,
-
-          hubspotProductId: null,
-          xeroItemCode: null,
-
+          quantity: row.quantity,
+          inventoryQty: row.quantity,
+          totalCost,
           createdByUserId: "system",
           createdAt: now,
           updatedAt: now,
         });
       }
 
-      setMessage(`Imported ${importPreview.length} products into Firestore.`);
+      setMessage(
+        `Cleared ${existingSnapshot.size} existing items and imported ${importPreview.length} new records.`,
+      );
       setImportPreview([]);
-      await loadProducts();
+      await loadItems();
     } catch (err: any) {
-      console.error("Error importing products", err);
-      setError(err?.message ?? "Error importing products");
+      console.error("Error importing items", err);
+      setError(err?.message ?? "Error importing items");
     } finally {
       setImporting(false);
     }
@@ -294,38 +349,43 @@ export default function InventoryPage() {
 
   const tabCounts = useMemo(() => {
     const counts: Record<TabKey, number> = {
+      all: 0,
       products: 0,
       subAssemblies: 0,
       components: 0,
+      sensors: 0,
+      sensorExtras: 0,
     };
-    products.forEach((product) => {
-      const match = tabOptions.find((tab) => matchesTab(product, tab.key));
+    items.forEach((item) => {
+      const match = tabOptions.find((tab) => matchesTab(item, tab.key));
       if (match) {
         counts[match.key] += 1;
       }
     });
+    counts.all = items.length;
     return counts;
-  }, [products]);
+  }, [items]);
 
-  const itemsForActiveTab = useMemo(
-    () => products.filter((product) => matchesTab(product, activeTab)),
-    [products, activeTab],
-  );
+  const itemsForActiveTab = useMemo(() => {
+    if (activeTab === "all") return items;
+    return items.filter((item) => matchesTab(item, activeTab));
+  }, [items, activeTab]);
 
   const activeTabLabel =
     tabOptions.find((tab) => tab.key === activeTab)?.label ?? "Products";
 
   // Apply text filter
-  const filteredProducts = (() => {
+  const filteredItems = (() => {
     const text = filterText.trim().toLowerCase();
     if (!text) return itemsForActiveTab;
 
     return itemsForActiveTab.filter((p) => {
       const values = [
-        p.sku,
         p.name,
         p.itemType,
-        p.environment,
+        p.supplier1,
+        p.supplier2,
+        p.shortCode,
         p.status,
       ]
         .filter(Boolean)
@@ -343,13 +403,33 @@ export default function InventoryPage() {
     <main className="ims-content">
       <div className="ims-page-header ims-page-header--with-actions">
         <div>
-          <h1 className="ims-page-title">Products</h1>
+          <h1 className="ims-page-title">Inventory</h1>
           <p className="ims-page-subtitle">
-            Existing items in the WATR inventory master. Use the CSV import
-            to seed from your configurator list.
+            Browse products, sub-assemblies, components, sensors, and sensor
+            extras in the WATR inventory master. Use the CSV import to seed
+            new records from your configurator list.
           </p>
         </div>
         <div className="ims-page-actions">
+          <div
+            style={{
+              display: "flex",
+              flexWrap: "wrap",
+              gap: "0.35rem",
+              marginBottom: "0.5rem",
+            }}
+          >
+            {creationTabOptions.map((tab) => (
+              <Link
+                key={tab.key}
+                href={createPaths[tab.key]}
+                className="ims-secondary-button"
+                style={{ fontSize: "0.8rem" }}
+              >
+                + Add {tab.label}
+              </Link>
+            ))}
+          </div>
           <label className="ims-secondary-button ims-file-label">
             <input
               type="file"
@@ -360,16 +440,16 @@ export default function InventoryPage() {
             Upload CSV
           </label>
           {importPreview.length > 0 && (
-            <button
-              className="ims-primary-button"
-              onClick={handleImport}
-              disabled={importing}
-            >
-              {importing
-                ? "Importing…"
-                : `Import ${importPreview.length} products`}
-            </button>
-          )}
+              <button
+                className="ims-primary-button"
+                onClick={handleImport}
+                disabled={importing}
+              >
+                {importing
+                  ? "Importing…"
+                  : `Import ${importPreview.length} items`}
+              </button>
+            )}
         </div>
       </div>
 
@@ -404,7 +484,7 @@ export default function InventoryPage() {
         </div>
       )}
 
-      {/* Existing products table */}
+      {/* Inventory table */}
       <section className="card ims-table-card">
         <div className="ims-table-header" style={{ alignItems: "flex-start" }}>
           <div>
@@ -412,7 +492,7 @@ export default function InventoryPage() {
             <span className="ims-table-count">
               {loading
                 ? "Loading…"
-                : `${filteredProducts.length} of ${itemsForActiveTab.length} ${
+                : `${filteredItems.length} of ${itemsForActiveTab.length} ${
                     itemsForActiveTab.length === 1 ? "item" : "items"
                   }`}
             </span>
@@ -430,7 +510,7 @@ export default function InventoryPage() {
             {/* Filter input */}
             <input
               type="text"
-              placeholder="Filter by SKU, name, type, environment..."
+              placeholder="Filter by name, type, supplier, code..."
               value={filterText}
               onChange={(e) => setFilterText(e.target.value)}
               className="ims-field-input"
@@ -542,7 +622,7 @@ export default function InventoryPage() {
           </div>
         </div>
 
-        {filteredProducts.length === 0 && !loading ? (
+        {filteredItems.length === 0 && !loading ? (
           <p className="ims-table-empty">
             No {activeTabLabel.toLowerCase()} match this filter or tab. Try
             clearing the filter or import from CSV.
@@ -558,26 +638,18 @@ export default function InventoryPage() {
                 </tr>
               </thead>
               <tbody>
-                {filteredProducts.map((p) => (
+                {filteredItems.map((p) => (
                   <tr key={p.id}>
                     {visibleColumnConfigs.map((col) => {
                       switch (col.key) {
-                        case "sku":
-                          return (
-                            <td key={col.key}>
-                              <Link
-                                href={getInventoryDetailPath(p.id, p.itemType)}
-                                className="ims-table-link"
-                              >
-                                {p.sku}
-                              </Link>
-                            </td>
-                          );
                         case "name":
                           return (
                             <td key={col.key}>
                               <Link
-                                href={getInventoryDetailPath(p.id, p.itemType)}
+                                href={getInventoryDetailPath(
+                                  p.id,
+                                  p.itemType,
+                                )}
                                 className="ims-table-link"
                               >
                                 {p.name}
@@ -588,25 +660,39 @@ export default function InventoryPage() {
                           return (
                             <td key={col.key}>{p.itemType || "–"}</td>
                           );
-                        case "standardCost":
+                        case "supplier1":
+                          return (
+                            <td key={col.key}>{p.supplier1 || "–"}</td>
+                          );
+                        case "supplier2":
+                          return (
+                            <td key={col.key}>{p.supplier2 || "–"}</td>
+                          );
+                        case "shortCode":
+                          return (
+                            <td key={col.key}>{p.shortCode || "–"}</td>
+                          );
+                        case "pricePerUnit":
                           return (
                             <td key={col.key}>
-                              {p.standardCost != null
-                                ? `£${p.standardCost.toFixed(2)}`
+                              {p.pricePerUnit != null
+                                ? `£${p.pricePerUnit.toFixed(2)}`
                                 : "–"}
                             </td>
                           );
-                        case "salesPrice":
+                        case "quantity":
                           return (
                             <td key={col.key}>
-                              {p.salesPrice != null
-                                ? `£${p.salesPrice.toFixed(2)}`
-                                : "–"}
+                              {p.quantity != null ? p.quantity : "–"}
                             </td>
                           );
-                        case "environment":
+                        case "totalCost":
                           return (
-                            <td key={col.key}>{p.environment || "–"}</td>
+                            <td key={col.key}>
+                              {p.totalCost != null
+                                ? `£${p.totalCost.toFixed(2)}`
+                                : "–"}
+                            </td>
                           );
                         case "status":
                           return (
@@ -648,27 +734,27 @@ export default function InventoryPage() {
             <table className="ims-table ims-table--compact">
               <thead>
                 <tr>
-                  <th>SKU</th>
                   <th>Name</th>
-                  <th>Must have</th>
-                  <th>Environment</th>
-                  <th>Std cost</th>
-                  <th>Sales price</th>
+                  <th>Type</th>
+                  <th>Supplier 1</th>
+                  <th>Supplier 2</th>
+                  <th>Short code</th>
+                  <th>Price / unit</th>
+                  <th>Qty</th>
+                  <th>Total cost</th>
                 </tr>
               </thead>
               <tbody>
-                {importPreview.map((row) => (
-                  <tr key={row.sku}>
-                    <td>{row.sku}</td>
+                {importPreview.map((row, index) => (
+                  <tr key={`${row.shortCode || row.name}-${index}`}>
                     <td>{row.name}</td>
-                    <td>{row.mustHave || "–"}</td>
-                    <td>{row.environment || "–"}</td>
-                    <td>£{row.standardCost.toFixed(2)}</td>
-                    <td>
-                      {row.salesPrice != null
-                        ? `£${row.salesPrice.toFixed(2)}`
-                        : "–"}
-                    </td>
+                    <td>{row.type || "–"}</td>
+                    <td>{row.supplier1 || "–"}</td>
+                    <td>{row.supplier2 || "–"}</td>
+                    <td>{row.shortCode || "–"}</td>
+                    <td>£{row.pricePerUnit.toFixed(2)}</td>
+                    <td>{row.quantity || 0}</td>
+                    <td>£{row.totalCost.toFixed(2)}</td>
                   </tr>
                 ))}
               </tbody>

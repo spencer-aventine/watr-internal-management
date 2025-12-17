@@ -1,2 +1,8 @@
 // src/app/inventory/sub-assemblies/[id]/page.tsx
-export { default } from "../../components/[id]/page";
+"use client";
+
+import InventoryItemDetailPage from "../../_components/InventoryItemDetailPage";
+
+export default function SubAssemblyDetailPage() {
+  return <InventoryItemDetailPage detailType="subAssemblies" />;
+}
