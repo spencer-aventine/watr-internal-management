@@ -2313,29 +2313,28 @@ export default function InventoryItemDetailPage({
         const ref = collection(db, "items");
         const snap = await getDocs(query(ref, orderBy("name")));
         if (cancelled) return;
-        const options: ComponentOption[] = snap.docs
-          .map((docSnap) => {
-            const data = docSnap.data() as any;
-            const type = normalizeItemType(
-              data.itemType ?? data.rawCsvItemType ?? data.category ?? "",
-            );
-            if (
-              type !== "component" &&
-              type !== "components" &&
-              type !== "component part"
-            ) {
-              return null;
-            }
-            return {
-              id: docSnap.id,
-              name: data.name ?? data.sku ?? "Component",
-              sku: data.sku ?? data.shortCode ?? null,
-              unitPrice:
-                parseNumber(data.pricePerUnit) ??
-                parseNumber(data.standardCost),
-            };
-          })
-          .filter((entry): entry is ComponentOption => Boolean(entry));
+        const options: ComponentOption[] = [];
+        snap.docs.forEach((docSnap) => {
+          const data = docSnap.data() as any;
+          const type = normalizeItemType(
+            data.itemType ?? data.rawCsvItemType ?? data.category ?? "",
+          );
+          if (
+            type !== "component" &&
+            type !== "components" &&
+            type !== "component part"
+          ) {
+            return;
+          }
+          options.push({
+            id: docSnap.id,
+            name: data.name ?? data.sku ?? "Component",
+            sku: data.sku ?? data.shortCode ?? null,
+            unitPrice:
+              parseNumber(data.pricePerUnit) ??
+              parseNumber(data.standardCost),
+          });
+        });
         setComponentOptions(options);
       } catch (err) {
         console.error("Error loading component options", err);
@@ -2358,26 +2357,25 @@ export default function InventoryItemDetailPage({
         const ref = collection(db, "items");
         const snap = await getDocs(query(ref, orderBy("name")));
         if (cancelled) return;
-        const options: SensorExtraOption[] = snap.docs
-          .map((docSnap) => {
-            const data = docSnap.data() as any;
-            const type = normalizeItemType(
-              data.itemType ?? data.rawCsvItemType ?? "",
-            );
-            if (
-              type !== "sensor extra" &&
-              type !== "sensor extras" &&
-              type !== "sensorextra"
-            ) {
-              return null;
-            }
-            return {
-              id: docSnap.id,
-              name: data.name ?? data.sku ?? "Sensor extra",
-              sku: data.sku ?? null,
-            };
-          })
-          .filter((entry): entry is SensorExtraOption => Boolean(entry));
+        const options: SensorExtraOption[] = [];
+        snap.docs.forEach((docSnap) => {
+          const data = docSnap.data() as any;
+          const type = normalizeItemType(
+            data.itemType ?? data.rawCsvItemType ?? "",
+          );
+          if (
+            type !== "sensor extra" &&
+            type !== "sensor extras" &&
+            type !== "sensorextra"
+          ) {
+            return;
+          }
+          options.push({
+            id: docSnap.id,
+            name: data.name ?? data.sku ?? "Sensor extra",
+            sku: data.sku ?? null,
+          });
+        });
         setSensorExtraOptions(options);
       } catch (err) {
         console.error("Error loading sensor extras", err);
