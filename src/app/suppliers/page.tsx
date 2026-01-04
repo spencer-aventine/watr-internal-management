@@ -9,6 +9,7 @@ import {
   orderBy,
   query,
   Timestamp,
+  deleteDoc,
   updateDoc,
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
@@ -53,6 +54,7 @@ export default function SuppliersPage() {
   const [form, setForm] = useState<SupplierFormState>(emptyForm);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -175,6 +177,29 @@ export default function SuppliersPage() {
     }
   };
 
+  const handleDeleteSupplier = async (supplierId: string) => {
+    if (isReadOnly) {
+      setError("You do not have permission to delete suppliers.");
+      return;
+    }
+    setError(null);
+    setMessage(null);
+    setDeletingId(supplierId);
+    try {
+      await deleteDoc(doc(db, "suppliers", supplierId));
+      setMessage("Supplier deleted.");
+      const nextPreferred =
+        supplierId === selectedId ? undefined : selectedId ?? undefined;
+      setSelectedId(supplierId === selectedId ? null : selectedId);
+      await loadSuppliers(nextPreferred);
+    } catch (err: any) {
+      console.error("Error deleting supplier", err);
+      setError(err?.message ?? "Unable to delete supplier.");
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
   return (
     <main className="ims-content">
       <div className="ims-page-header ims-page-header--with-actions">
@@ -239,21 +264,39 @@ export default function SuppliersPage() {
             <ul className="ims-list">
               {suppliers.map((supplier) => (
                 <li key={supplier.id}>
-                  <button
-                    type="button"
-                    onClick={() => handleSelectSupplier(supplier.id)}
-                    className={
-                      "ims-list-button" +
-                      (supplier.id === selectedId
-                        ? " ims-list-button--active"
-                        : "")
-                    }
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "0.5rem",
+                    }}
                   >
-                    <span>{supplier.name}</span>
-                    <span className="ims-list-subtitle">
-                      {supplier.contactName || supplier.email || supplier.phone || "No contact"}
-                    </span>
-                  </button>
+                    <button
+                      type="button"
+                      onClick={() => handleSelectSupplier(supplier.id)}
+                      className={
+                        "ims-list-button" +
+                        (supplier.id === selectedId
+                          ? " ims-list-button--active"
+                          : "")
+                      }
+                      style={{ flex: 1 }}
+                    >
+                      <span>{supplier.name}</span>
+                      <span className="ims-list-subtitle">
+                        {supplier.contactName || supplier.email || supplier.phone || "No contact"}
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      className="ims-text-button"
+                      aria-label={`Delete ${supplier.name}`}
+                      onClick={() => handleDeleteSupplier(supplier.id)}
+                      disabled={isReadOnly || deletingId === supplier.id}
+                    >
+                      {deletingId === supplier.id ? "Deleting…" : "Delete"}
+                    </button>
+                  </div>
                 </li>
               ))}
             </ul>

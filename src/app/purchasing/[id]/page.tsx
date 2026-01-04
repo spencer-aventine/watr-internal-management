@@ -53,6 +53,7 @@ type PurchaseRecord = {
   vendorName: string;
   supplierContact?: string | null;
   supplierAddress?: string | null;
+  vatNumber?: string | null;
   shipTo?: string | null;
   supplierId?: string | null;
   deliveryFee?: number | null;
@@ -63,16 +64,22 @@ type PurchaseRecord = {
   notes?: string | null;
   createdAt?: Timestamp | null;
   lineItems: PurchaseLine[];
-  status: PurchaseStatus;
+  status: NewPurchaseStatus;
   stockAppliedAt?: Timestamp | null;
   attachments: PurchaseAttachment[];
   internalNotes: PurchaseNote[];
 };
 
-type PurchaseStatus = "draft" | "paid" | "stock_received";
+type NewPurchaseStatus = "draft" | "sent" | "goods_received";
+
+const normalizeStatus = (value?: string | null): NewPurchaseStatus => {
+  if (value === "goods_received" || value === "stock_received") return "goods_received";
+  if (value === "sent" || value === "paid") return "sent";
+  return "draft";
+};
 
 const statusThemes: Record<
-  PurchaseStatus,
+  NewPurchaseStatus,
   { label: string; bg: string; color: string; border: string }
 > = {
   draft: {
@@ -81,14 +88,14 @@ const statusThemes: Record<
     color: "#92400e",
     border: "#fcd34d",
   },
-  paid: {
-    label: "Paid",
+  sent: {
+    label: "Sent",
     bg: "#dbeafe",
     color: "#1d4ed8",
     border: "#93c5fd",
   },
-  stock_received: {
-    label: "Stock received",
+  goods_received: {
+    label: "Goods received",
     bg: "#dcfce7",
     color: "#166534",
     border: "#86efac",
@@ -164,6 +171,7 @@ export default function PurchaseDetailPage() {
           vendorName: data.vendorName ?? "Unknown vendor",
           supplierContact: data.supplierContact ?? null,
           supplierAddress: data.supplierAddress ?? null,
+          vatNumber: data.vatNumber ?? null,
           shipTo: data.shipTo ?? null,
           supplierId: data.supplierId ?? null,
           deliveryFee:
@@ -176,7 +184,7 @@ export default function PurchaseDetailPage() {
           notes: data.notes ?? null,
           createdAt: data.createdAt ?? null,
           lineItems: Array.isArray(data.lineItems) ? data.lineItems : [],
-          status: (data.status as PurchaseStatus) ?? "draft",
+          status: normalizeStatus(data.status as any),
           stockAppliedAt: data.stockAppliedAt ?? null,
           attachments: Array.isArray(data.attachments)
             ? data.attachments
@@ -244,14 +252,14 @@ export default function PurchaseDetailPage() {
     await batch.commit();
   };
 
-  const handleStatusChange = async (nextStatus: PurchaseStatus) => {
+  const handleStatusChange = async (nextStatus: NewPurchaseStatus) => {
     if (!purchase || nextStatus === purchase.status) return;
     setStatusUpdating(true);
     setStatusError(null);
     setStatusMessage(null);
     const now = Timestamp.now();
     const shouldApplyInventory =
-      nextStatus === "stock_received" && !purchase.stockAppliedAt;
+      nextStatus === "goods_received" && !purchase.stockAppliedAt;
 
     try {
       if (shouldApplyInventory) {
@@ -286,7 +294,7 @@ export default function PurchaseDetailPage() {
     }
   };
 
-  const canEditStockCounts = purchase?.status === "stock_received";
+  const canEditStockCounts = purchase?.status === "goods_received";
 
   const itemsSubtotal = useMemo(() => {
     if (!purchase) return 0;
@@ -502,7 +510,7 @@ export default function PurchaseDetailPage() {
             }
             className="ims-secondary-button"
           >
-            Create external PO
+            View external PO
           </Link>
           <Link href="/purchasing" className="ims-primary-button">
             + Log new purchase
@@ -562,6 +570,12 @@ export default function PurchaseDetailPage() {
                   {purchase.shipTo?.trim() ? purchase.shipTo : "—"}
                 </p>
               </div>
+              <div>
+                <p className="ims-field-label">VAT number</p>
+                <p style={{ margin: 0 }}>
+                  {purchase.vatNumber?.trim() ? purchase.vatNumber : "—"}
+                </p>
+              </div>
             </div>
 
             <div
@@ -618,13 +632,13 @@ export default function PurchaseDetailPage() {
                   color: statusTheme.color,
                   borderColor: statusTheme.border,
                 }}
-                value={purchase.status}
-                onChange={(e) =>
-                  handleStatusChange(e.target.value as PurchaseStatus)
+              value={purchase.status}
+              onChange={(e) =>
+                  handleStatusChange(e.target.value as NewPurchaseStatus)
                 }
-                disabled={statusUpdating}
-              >
-                {(Object.keys(statusThemes) as PurchaseStatus[]).map((key) => (
+              disabled={statusUpdating}
+            >
+                {(Object.keys(statusThemes) as NewPurchaseStatus[]).map((key) => (
                   <option key={key} value={key}>
                     {statusThemes[key].label}
                   </option>

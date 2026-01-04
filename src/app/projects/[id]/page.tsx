@@ -10,6 +10,7 @@ import {
   Timestamp,
   writeBatch,
   increment,
+  updateDoc,
 } from "firebase/firestore";
 import {
   ProjectItemLine,
@@ -71,6 +72,7 @@ export default function ProjectDetailPage() {
     stageId: string | null;
     stageLabel: string | null;
     lastModified: string | null;
+    syncedAt?: Timestamp | null;
   } | null>(null);
   const [hubspotLoading, setHubspotLoading] = useState(false);
   const [hubspotError, setHubspotError] = useState<string | null>(null);
@@ -104,7 +106,19 @@ export default function ProjectDetailPage() {
       };
 
       setProject(proj);
-      setHubspotData(null);
+      const savedHubspot = data.hubspotData as any;
+      if (savedHubspot) {
+        setHubspotData({
+          id: savedHubspot.id ?? proj.hubspotDealId ?? "",
+          name: savedHubspot.name ?? null,
+          stageId: savedHubspot.stageId ?? null,
+          stageLabel: savedHubspot.stageLabel ?? null,
+          lastModified: savedHubspot.lastModified ?? null,
+          syncedAt: savedHubspot.syncedAt ?? null,
+        });
+      } else {
+        setHubspotData(null);
+      }
       setHubspotError(null);
     } catch (err: any) {
       console.error("Error loading project", err);
@@ -387,6 +401,7 @@ export default function ProjectDetailPage() {
     if (!project?.hubspotDealId) return;
     setHubspotLoading(true);
     setHubspotError(null);
+    setMessage(null);
     try {
       const response = await fetch(
         `/api/hubspot/projects/${encodeURIComponent(project.hubspotDealId)}`,
@@ -396,7 +411,33 @@ export default function ProjectDetailPage() {
         throw new Error(payload?.error || response.statusText);
       }
       const payload = await response.json();
-      setHubspotData(payload.project);
+      const syncedAt = Timestamp.now();
+      const mapped = {
+        ...payload.project,
+        syncedAt,
+      };
+      setHubspotData(mapped);
+
+      try {
+        const projRef = doc(db, "projects", project.id);
+        await updateDoc(projRef, {
+          hubspotData: {
+            id: mapped.id ?? project.hubspotDealId ?? null,
+            name: mapped.name ?? null,
+            stageId: mapped.stageId ?? null,
+            stageLabel: mapped.stageLabel ?? null,
+            lastModified: mapped.lastModified ?? null,
+            syncedAt,
+          },
+        });
+        setMessage("HubSpot data synced to project.");
+      } catch (saveErr: any) {
+        console.error("Error saving HubSpot data to project", saveErr);
+        setHubspotError(
+          saveErr?.message ??
+            "Loaded HubSpot data but failed to save it to the project.",
+        );
+      }
     } catch (err: any) {
       console.error("Error loading HubSpot data", err);
       setHubspotError(err?.message ?? "Unable to load HubSpot project data.");
@@ -585,6 +626,14 @@ export default function ProjectDetailPage() {
                   <div className="ims-field">
                     <span className="ims-field-label">Last modified</span>
                     <div>{hubspotData.lastModified || "—"}</div>
+                  </div>
+                  <div className="ims-field">
+                    <span className="ims-field-label">Last synced</span>
+                    <div>
+                      {hubspotData.syncedAt
+                        ? formatDate(hubspotData.syncedAt)
+                        : "—"}
+                    </div>
                   </div>
                 </div>
               ) : (

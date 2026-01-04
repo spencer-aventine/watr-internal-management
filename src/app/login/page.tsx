@@ -4,11 +4,31 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   signInWithEmailAndPassword,
-  createUserWithEmailAndPassword,
+  isSignInWithEmailLink,
+  signInWithEmailLink,
+  updatePassword,
 } from "firebase/auth";
-import { doc, getDoc, setDoc, Timestamp } from "firebase/firestore";
+import {
+  collection,
+  deleteDoc,
+  doc,
+  getDoc,
+  getDocs,
+  query,
+  setDoc,
+  Timestamp,
+  where,
+  type DocumentReference,
+} from "firebase/firestore";
 import { auth, db } from "@/lib/firebase";
 import { useAuth } from "../_components/AuthProvider";
+
+type AccountStatus = "admin" | "coreUser" | "viewOnly";
+
+type PendingInvite = {
+  ref: DocumentReference;
+  status: AccountStatus;
+};
 
 export default function LoginPage() {
   const router = useRouter();
@@ -16,9 +36,9 @@ export default function LoginPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
-  const [isRegister, setIsRegister] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [isEmailLinkMode, setIsEmailLinkMode] = useState(false);
 
   useEffect(() => {
     if (user) {
@@ -26,13 +46,61 @@ export default function LoginPage() {
     }
   }, [user, router]);
 
-  const ensureUserProfile = async (uid: string, emailAddress: string) => {
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (isSignInWithEmailLink(auth, window.location.href)) {
+      setIsEmailLinkMode(true);
+      const storedEmail = window.localStorage.getItem("watr_invite_email") ?? "";
+      if (storedEmail) {
+        setEmail(storedEmail);
+      }
+    }
+  }, []);
+
+  const normalizeStatus = (value?: string | null): AccountStatus => {
+    switch (value) {
+      case "admin":
+      case "coreUser":
+      case "viewOnly":
+        return value;
+      case "core user":
+      case "core-user":
+        return "coreUser";
+      default:
+        return "viewOnly";
+    }
+  };
+
+  const fetchPendingInvite = async (
+    emailAddress: string,
+  ): Promise<PendingInvite | null> => {
+    const emailLower = emailAddress.trim().toLowerCase();
+    const snap = await getDocs(
+      query(
+        collection(db, "pendingInvites"),
+        where("emailLower", "==", emailLower),
+      ),
+    );
+    const inviteDoc = snap.docs[0];
+    if (!inviteDoc) return null;
+    const data = inviteDoc.data() as any;
+    const status = normalizeStatus(data.accountStatus);
+    return { ref: inviteDoc.ref, status };
+  };
+
+  const ensureUserProfile = async (
+    uid: string,
+    emailAddress: string,
+    accountStatusOverride?: AccountStatus | null,
+  ) => {
     const profileRef = doc(db, "users", uid);
     const profileSnap = await getDoc(profileRef);
     if (!profileSnap.exists()) {
       await setDoc(profileRef, {
         email: emailAddress,
-        accountStatus: "viewOnly",
+        accountStatus: accountStatusOverride ?? "viewOnly",
+        invitedAt: Timestamp.now(),
+        acceptedAt: Timestamp.now(),
         createdAt: Timestamp.now(),
         updatedAt: Timestamp.now(),
       });
@@ -41,6 +109,18 @@ export default function LoginPage() {
         profileRef,
         {
           email: emailAddress,
+          ...(accountStatusOverride ? { accountStatus: accountStatusOverride } : {}),
+          acceptedAt: profileSnap.data()?.acceptedAt ?? Timestamp.now(),
+          updatedAt: Timestamp.now(),
+        },
+        { merge: true },
+      );
+    } else if (accountStatusOverride) {
+      await setDoc(
+        profileRef,
+        {
+          accountStatus: accountStatusOverride,
+          acceptedAt: profileSnap.data()?.acceptedAt ?? Timestamp.now(),
           updatedAt: Timestamp.now(),
         },
         { merge: true },
@@ -53,21 +133,44 @@ export default function LoginPage() {
     setError(null);
     setLoading(true);
     try {
-      if (isRegister) {
-        if (password !== confirmPassword) {
-          setError("Passwords do not match.");
+      if (isEmailLinkMode) {
+        const trimmedEmail = email.trim();
+        if (!trimmedEmail) {
+          setError("Enter your email to complete sign-in.");
           setLoading(false);
           return;
         }
-        const credential = await createUserWithEmailAndPassword(
-          auth,
-          email.trim(),
-          password,
-        );
-        const createdUser = credential.user;
-        if (createdUser) {
-          await ensureUserProfile(createdUser.uid, createdUser.email ?? email.trim());
+        if (password !== confirmPassword || !password.trim()) {
+          setError("Enter and confirm your new password.");
+          setLoading(false);
+          return;
         }
+        const invite = await fetchPendingInvite(trimmedEmail);
+        if (!invite) {
+          setError("This email is not invited. Ask an admin to invite you.");
+          setLoading(false);
+          return;
+        }
+        const credential = await signInWithEmailLink(
+          auth,
+          trimmedEmail,
+          window.location.href,
+        );
+        const signedInUser = credential.user;
+        if (signedInUser) {
+          await ensureUserProfile(
+            signedInUser.uid,
+            signedInUser.email ?? trimmedEmail,
+            invite.status,
+          );
+          await updatePassword(signedInUser, password);
+        }
+        try {
+          await deleteDoc(invite.ref);
+        } catch {
+          // non-fatal
+        }
+        window.localStorage.removeItem("watr_invite_email");
       } else {
         const credential = await signInWithEmailAndPassword(
           auth,
@@ -76,7 +179,10 @@ export default function LoginPage() {
         );
         const signedInUser = credential.user;
         if (signedInUser) {
-          await ensureUserProfile(signedInUser.uid, signedInUser.email ?? email.trim());
+          await ensureUserProfile(
+            signedInUser.uid,
+            signedInUser.email ?? email.trim(),
+          );
         }
       }
       router.replace("/");
@@ -91,9 +197,13 @@ export default function LoginPage() {
   return (
     <main className="ims-content" style={{ maxWidth: "420px", margin: "4rem auto" }}>
       <section className="card ims-form-section">
-        <h1 className="ims-form-section-title">Sign in</h1>
+        <h1 className="ims-form-section-title">
+          {isEmailLinkMode ? "Complete account setup" : "Sign in"}
+        </h1>
         <p className="ims-form-section-subtitle">
-          Access the WATR internal management system.
+          {isEmailLinkMode
+            ? "Enter your email and set a password to finish your invite."
+            : "Access the WATR internal management system."}
         </p>
         <form onSubmit={handleSubmit} className="ims-form" style={{ marginTop: "1rem" }}>
           <div className="ims-field">
@@ -112,21 +222,24 @@ export default function LoginPage() {
           </div>
 
           <div className="ims-field">
-            <label className="ims-field-label" htmlFor="password">
-              Password
+            <label
+              className="ims-field-label"
+              htmlFor={isEmailLinkMode ? "newPassword" : "password"}
+            >
+              {isEmailLinkMode ? "Create password" : "Password"}
             </label>
             <input
-              id="password"
+              id={isEmailLinkMode ? "newPassword" : "password"}
               type="password"
               className="ims-field-input"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               required
-              autoComplete="current-password"
+              autoComplete={isEmailLinkMode ? "new-password" : "current-password"}
             />
           </div>
 
-          {isRegister && (
+          {isEmailLinkMode && (
             <div className="ims-field">
               <label className="ims-field-label" htmlFor="confirmPassword">
                 Confirm password
@@ -152,29 +265,15 @@ export default function LoginPage() {
               disabled={loading}
             >
               {loading
-                ? isRegister
-                  ? "Creating account…"
+                ? isEmailLinkMode
+                  ? "Completing…"
                   : "Signing in…"
-                : isRegister
-                  ? "Create account"
+                : isEmailLinkMode
+                  ? "Complete setup"
                   : "Sign in"}
             </button>
           </div>
         </form>
-        <p style={{ marginTop: "1rem", fontSize: "0.9rem" }}>
-          {isRegister ? "Already have an account?" : "Need an account?"}{" "}
-          <button
-            type="button"
-            className="ims-table-link"
-            onClick={() => {
-              setIsRegister((prev) => !prev);
-              setError(null);
-            }}
-            style={{ background: "none", border: "none", padding: 0, cursor: "pointer" }}
-          >
-            {isRegister ? "Sign in" : "Create one"}
-          </button>
-        </p>
       </section>
     </main>
   );

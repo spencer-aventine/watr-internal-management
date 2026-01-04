@@ -1,14 +1,17 @@
 const HUBSPOT_BASE_URL = "https://api.hubapi.com";
-const HUBSPOT_PROJECT_FIELDS = [
-  "hs_name",
-  "hs_pipeline_stage",
-  "hs_pipeline_stage_label",
-  "hs_lastmodifieddate",
-];
+const HUBSPOT_PROJECT_OBJECT_TYPE =
+  process.env.HUBSPOT_PROJECT_OBJECT_TYPE ?? "projects";
 
-export type HubspotProjectResponse = {
+export type HubspotObjectResponse = {
   id: string;
-  properties: Record<string, unknown>;
+  properties: Record<string, any>;
+};
+
+export type HubspotProjectResponse = HubspotObjectResponse;
+
+export type HubspotPipelineStage = {
+  id: string;
+  label?: string;
 };
 
 export const fetchHubspotProject = async (projectId: string) => {
@@ -20,9 +23,22 @@ export const fetchHubspotProject = async (projectId: string) => {
   }
 
   const url = new URL(
-    `${HUBSPOT_BASE_URL}/crm/v3/objects/projects/${encodeURIComponent(projectId)}`,
+    `${HUBSPOT_BASE_URL}/crm/v3/objects/${encodeURIComponent(
+      HUBSPOT_PROJECT_OBJECT_TYPE,
+    )}/${encodeURIComponent(projectId)}`,
   );
-  url.searchParams.set("properties", HUBSPOT_PROJECT_FIELDS.join(","));
+  url.searchParams.set(
+    "properties",
+    [
+      "hs_name",
+      "projectname",
+      "name",
+      "hs_pipeline", // required when dealing with stage updates
+      "hs_pipeline_stage",
+      "hs_pipeline_stage_label",
+      "hs_lastmodifieddate", // used in UI
+    ].join(","),
+  );
 
   const response = await fetch(url.toString(), {
     headers: {
@@ -42,6 +58,44 @@ export const fetchHubspotProject = async (projectId: string) => {
   return (await response.json()) as HubspotProjectResponse;
 };
 
+export const fetchHubspotStageLabel = async (
+  pipelineId: string,
+  stageId: string,
+): Promise<string | null> => {
+  const accessToken = process.env.HUBSPOT_PRIVATE_APP_TOKEN;
+  if (!accessToken) {
+    throw new Error(
+      "Missing HUBSPOT_PRIVATE_APP_TOKEN. Set it in your environment variables.",
+    );
+  }
+
+  const url = `${HUBSPOT_BASE_URL}/crm/v3/pipelines/${encodeURIComponent(
+    HUBSPOT_PROJECT_OBJECT_TYPE,
+  )}/${encodeURIComponent(pipelineId)}`;
+
+  const response = await fetch(url, {
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+    },
+    next: { revalidate: 0 },
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(
+      `HubSpot pipeline API error (${response.status}): ${text || response.statusText}`,
+    );
+  }
+
+  const data = (await response.json()) as {
+    stages?: HubspotPipelineStage[];
+  };
+  const match =
+    data?.stages?.find((stage) => stage.id === stageId) ?? null;
+  return match?.label ?? match?.id ?? null;
+};
+
 export const updateHubspotProjectStage = async (
   projectId: string,
   stageId: string,
@@ -53,7 +107,9 @@ export const updateHubspotProjectStage = async (
     );
   }
 
-  const url = `${HUBSPOT_BASE_URL}/crm/v3/objects/projects/${encodeURIComponent(projectId)}`;
+  const url = `${HUBSPOT_BASE_URL}/crm/v3/objects/${encodeURIComponent(
+    HUBSPOT_PROJECT_OBJECT_TYPE,
+  )}/${encodeURIComponent(projectId)}`;
   const response = await fetch(url, {
     method: "PATCH",
     headers: {

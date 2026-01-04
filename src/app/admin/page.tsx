@@ -3,13 +3,19 @@
 import { useEffect, useState } from "react";
 import {
   collection,
+  addDoc,
   doc,
   getDocs,
   Timestamp,
   updateDoc,
 } from "firebase/firestore";
-import { db } from "@/lib/firebase";
+import { sendSignInLinkToEmail } from "firebase/auth";
+import { auth, db } from "@/lib/firebase";
 import { useAuth } from "../_components/AuthProvider";
+
+const APP_URL =
+  process.env.NEXT_PUBLIC_APP_URL ??
+  "https://watr-internal-management.vercel.app";
 
 type AccountStatus = "admin" | "coreUser" | "viewOnly";
 
@@ -19,6 +25,8 @@ type UserRecord = {
   accountStatus: AccountStatus;
   createdAt?: Timestamp | null;
   updatedAt?: Timestamp | null;
+  invitedAt?: Timestamp | null;
+  acceptedAt?: Timestamp | null;
 };
 
 const statusOptions: { value: AccountStatus; label: string }[] = [
@@ -57,6 +65,9 @@ export default function AdminPage() {
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [updatingId, setUpdatingId] = useState<string | null>(null);
+  const [inviteEmail, setInviteEmail] = useState("");
+  const [inviteStatus, setInviteStatus] = useState<AccountStatus>("viewOnly");
+  const [inviting, setInviting] = useState(false);
 
   const loadUsers = async () => {
     setLoading(true);
@@ -72,6 +83,8 @@ export default function AdminPage() {
           accountStatus: normalizeStatus(data.accountStatus),
           createdAt: data.createdAt ?? null,
           updatedAt: data.updatedAt ?? null,
+          invitedAt: data.invitedAt ?? null,
+          acceptedAt: data.acceptedAt ?? null,
         };
       });
       setUsers(rows);
@@ -112,6 +125,41 @@ export default function AdminPage() {
       setError(err?.message ?? "Unable to update this user.");
     } finally {
       setUpdatingId(null);
+    }
+  };
+
+  const handleInvite = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setError(null);
+    setMessage(null);
+    const trimmed = inviteEmail.trim();
+    if (!trimmed || !/\S+@\S+\.\S+/.test(trimmed)) {
+      setError("Enter a valid email to invite.");
+      return;
+    }
+    setInviting(true);
+    try {
+      const actionCodeSettings = {
+        url: `${APP_URL.replace(/\/$/, "")}/login`,
+        handleCodeInApp: true,
+      };
+      await sendSignInLinkToEmail(auth, trimmed, actionCodeSettings);
+      window.localStorage.setItem("watr_invite_email", trimmed);
+      await addDoc(collection(db, "pendingInvites"), {
+        email: trimmed,
+        emailLower: trimmed.toLowerCase(),
+        accountStatus: inviteStatus,
+        invitedBy: auth.currentUser?.uid ?? null,
+        invitedAt: Timestamp.now(),
+        createdAt: Timestamp.now(),
+      });
+      setMessage("Invite sent. The user will get a sign-in link.");
+      setInviteEmail("");
+    } catch (err: any) {
+      console.error("Error sending invite", err);
+      setError(err?.message ?? "Unable to send invite.");
+    } finally {
+      setInviting(false);
     }
   };
 
@@ -173,6 +221,54 @@ export default function AdminPage() {
           </span>
         </div>
 
+        <form
+          onSubmit={handleInvite}
+          className="ims-form"
+          style={{ marginBottom: "1rem", gap: "0.5rem" }}
+        >
+          <div className="ims-field">
+            <label className="ims-field-label" htmlFor="inviteEmail">
+              Invite user by email
+            </label>
+            <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
+              <input
+                id="inviteEmail"
+                type="email"
+                className="ims-field-input"
+                value={inviteEmail}
+                onChange={(e) => setInviteEmail(e.target.value)}
+                placeholder="name@example.com"
+                required
+                style={{ flex: 1 }}
+              />
+              <select
+                className="ims-field-input"
+                style={{ width: "180px" }}
+                value={inviteStatus}
+                onChange={(e) =>
+                  setInviteStatus(e.target.value as AccountStatus)
+                }
+              >
+                {statusOptions.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+              <button
+                type="submit"
+                className="ims-primary-button"
+                disabled={inviting}
+              >
+                {inviting ? "Sending…" : "Invite"}
+              </button>
+            </div>
+            <p className="ims-field-help">
+              We’ll send a magic sign-in link so they can create their account with the chosen access level.
+            </p>
+          </div>
+        </form>
+
         {loading ? (
           <p className="ims-table-empty">Loading accounts…</p>
         ) : users.length === 0 ? (
@@ -187,6 +283,8 @@ export default function AdminPage() {
                 <tr>
                   <th>Email</th>
                   <th style={{ width: "160px" }}>Account status</th>
+                  <th style={{ width: "140px" }}>Invited</th>
+                  <th style={{ width: "140px" }}>Accepted</th>
                   <th>Created</th>
                   <th>Last updated</th>
                 </tr>
@@ -214,6 +312,8 @@ export default function AdminPage() {
                         ))}
                       </select>
                     </td>
+                    <td>{formatDate(user.invitedAt)}</td>
+                    <td>{formatDate(user.acceptedAt)}</td>
                     <td>{formatDate(user.createdAt)}</td>
                     <td>{user.updatedAt ? formatDate(user.updatedAt) : "—"}</td>
                   </tr>

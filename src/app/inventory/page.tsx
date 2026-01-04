@@ -81,21 +81,8 @@ const tabOptions: { key: TabKey; label: string }[] = [
   { key: "sensorExtras", label: "Sensor extras" },
 ];
 
-const creationTabOptions = tabOptions.filter(
-  (tab): tab is { key: Exclude<TabKey, "all">; label: string } =>
-    tab.key !== "all",
-);
-
-const createPaths: Record<Exclude<TabKey, "all">, string> = {
-  products: "/inventory/new?type=products",
-  subAssemblies: "/inventory/sub-assemblies/new",
-  components: "/inventory/new?type=components",
-  sensors: "/inventory/new?type=sensors",
-  sensorExtras: "/inventory/new?type=sensorExtras",
-};
-
-// Single source of truth for columns
-const allColumns: ColumnConfig[] = [
+  // Single source of truth for columns
+  const allColumns: ColumnConfig[] = [
   { key: "name", label: "Name" },
   { key: "itemType", label: "Type" },
   { key: "supplier1", label: "Supplier 1" },
@@ -411,25 +398,12 @@ export default function InventoryPage() {
           </p>
         </div>
         <div className="ims-page-actions">
-          <div
-            style={{
-              display: "flex",
-              flexWrap: "wrap",
-              gap: "0.35rem",
-              marginBottom: "0.5rem",
-            }}
+          <Link
+            href="/data/master-data"
+            className="ims-secondary-button"
           >
-            {creationTabOptions.map((tab) => (
-              <Link
-                key={tab.key}
-                href={createPaths[tab.key]}
-                className="ims-secondary-button"
-                style={{ fontSize: "0.8rem" }}
-              >
-                + Add {tab.label}
-              </Link>
-            ))}
-          </div>
+            + Add inventory items
+          </Link>
           <label className="ims-secondary-button ims-file-label">
             <input
               type="file"
@@ -440,16 +414,16 @@ export default function InventoryPage() {
             Upload CSV
           </label>
           {importPreview.length > 0 && (
-              <button
-                className="ims-primary-button"
-                onClick={handleImport}
-                disabled={importing}
-              >
-                {importing
-                  ? "Importing…"
-                  : `Import ${importPreview.length} items`}
-              </button>
-            )}
+            <button
+              className="ims-primary-button"
+              onClick={handleImport}
+              disabled={importing}
+            >
+              {importing
+                ? "Importing…"
+                : `Import ${importPreview.length} items`}
+            </button>
+          )}
         </div>
       </div>
 

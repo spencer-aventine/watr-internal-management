@@ -24,6 +24,10 @@ import {
   type InventoryDetailType,
   normalizeItemType,
 } from "@/lib/inventoryPaths";
+import {
+  fetchWarehouseLocations,
+  WAREHOUSE_LOCATION_DEFAULTS,
+} from "@/lib/warehouseLocations";
 import { useAuth } from "@/app/_components/AuthProvider";
 
 type RelationshipEntry = {
@@ -51,7 +55,7 @@ type InventoryHistoryPoint = {
   toBucket?: string | null;
 };
 
-type PurchaseStatus = "draft" | "paid" | "stock_received";
+type PurchaseStatus = "draft" | "sent" | "goods_received";
 
 type PurchaseOrderSummary = {
   id: string;
@@ -62,12 +66,53 @@ type PurchaseOrderSummary = {
   proposedDeliveryDate?: Timestamp | null;
 };
 
+const normalizePurchaseStatus = (value?: string | null): PurchaseStatus => {
+  if (value === "goods_received" || value === "stock_received") return "goods_received";
+  if (value === "sent" || value === "paid") return "sent";
+  return "draft";
+};
+
+const purchaseStatusThemes: Record<
+  PurchaseStatus,
+  { label: string; bg: string; color: string; border: string }
+> = {
+  draft: {
+    label: "Draft",
+    bg: "#fef3c7",
+    color: "#92400e",
+    border: "#fcd34d",
+  },
+  sent: {
+    label: "Sent",
+    bg: "#dbeafe",
+    color: "#1d4ed8",
+    border: "#93c5fd",
+  },
+  goods_received: {
+    label: "Goods received",
+    bg: "#dcfce7",
+    color: "#166534",
+    border: "#86efac",
+  },
+};
+
+type ItemPurchaseStats = {
+  onOrderQty: number;
+  draftQty: number;
+  sentQty: number;
+  receivedQty: number;
+  orders: PurchaseOrderSummary[];
+};
+
 type InventoryItem = {
   id: string;
   name: string;
   sku: string;
   shortCode?: string | null;
   description?: string | null;
+  subAssemblyOwner?: string | null;
+  storageLocation?: string | null;
+  manufactureStatus?: string | null;
   itemType?: string | null;
   category?: string | null;
   status?: string | null;
@@ -100,6 +145,7 @@ type InventoryItem = {
   mandatorySensors: RelationshipEntry[];
   mandatorySensorExtras: RelationshipEntry[];
   inventoryHistory: InventoryHistoryPoint[];
+  dueDate?: Date | null;
 };
 
 type ComponentOption = {
@@ -311,6 +357,9 @@ const mapItemSnapshot = (snap: any): InventoryItem => {
     sku: data.sku ?? data.shortCode ?? data.code ?? "—",
     shortCode: data.shortCode ?? null,
     description: data.description ?? data.notes ?? "",
+    subAssemblyOwner: data.subAssemblyOwner ?? data.owner ?? null,
+    storageLocation: data.storageLocation ?? null,
+    manufactureStatus: data.manufactureStatus ?? null,
     itemType: data.itemType ?? data.rawCsvItemType ?? null,
     category: data.category ?? null,
     status: data.status ?? data.lifecycleStatus ?? null,
@@ -366,6 +415,7 @@ const mapItemSnapshot = (snap: any): InventoryItem => {
     inventoryHistory: parseInventoryHistory(
       data.inventoryHistory ?? data.inventoryMovements ?? data.inventorySnapshots,
     ),
+    dueDate: toDate(data.dueDate),
   };
 };
 
@@ -495,10 +545,6 @@ const InventorySnapshotCard = ({
     { label: "WIP", value: item.wipQty },
     { label: "Completed", value: item.completedQty },
   ];
-  const totalStock = buckets.reduce(
-    (sum, bucket) => sum + (bucket.value ?? 0),
-    0,
-  );
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
@@ -634,11 +680,8 @@ const InventorySnapshotCard = ({
         ))}
       </div>
       <div style={{ marginTop: "0.9rem" }}>
-        <div className="ims-metric-label">Total on hand</div>
-        <div className="ims-metric-value">{formatNumber(totalStock)}</div>
-        <div className="ims-metric-note">
-          Low-stock threshold: {lowStockDisplay}
-        </div>
+        <div className="ims-metric-label">Low-stock threshold</div>
+        <div className="ims-metric-value">{lowStockDisplay}</div>
       </div>
       {editing && (
         <div className="ims-field" style={{ marginTop: "0.9rem" }}>
@@ -719,12 +762,7 @@ const PurchasePipelineCard = ({
   error,
   itemName,
 }: {
-  stats: {
-    totalQty: number;
-    draftQty: number;
-    paidQty: number;
-    orders: PurchaseOrderSummary[];
-  } | null;
+  stats: ItemPurchaseStats | null;
   loading: boolean;
   error: string | null;
   itemName: string;
@@ -745,7 +783,8 @@ const PurchasePipelineCard = ({
     <section className="ims-form-section card">
       <h2 className="ims-form-section-title">Purchase orders</h2>
       <p className="ims-form-section-subtitle">
-        Draft and paid orders for {itemName}, covering what is coming into stock.
+        Draft, sent and goods-received orders for {itemName}, showing what is booked
+        in across the purchasing pipeline.
       </p>
       {error && (
         <div className="ims-alert ims-alert--error" style={{ marginBottom: "0.75rem" }}>
@@ -767,9 +806,9 @@ const PurchasePipelineCard = ({
             }}
           >
             <div className="card" style={{ padding: "0.65rem" }}>
-              <div className="ims-metric-label">Total ordered</div>
+              <div className="ims-metric-label">On purchase order</div>
               <div className="ims-metric-value">
-                {formatNumber(stats.totalQty)}
+                {formatNumber(stats.onOrderQty)}
               </div>
             </div>
             <div className="card" style={{ padding: "0.65rem" }}>
@@ -779,26 +818,43 @@ const PurchasePipelineCard = ({
               </div>
             </div>
             <div className="card" style={{ padding: "0.65rem" }}>
-              <div className="ims-metric-label">Paid</div>
+              <div className="ims-metric-label">Sent</div>
               <div className="ims-metric-value">
-                {formatNumber(stats.paidQty)}
+                {formatNumber(stats.sentQty)}
+              </div>
+            </div>
+            <div className="card" style={{ padding: "0.65rem" }}>
+              <div className="ims-metric-label">Goods received</div>
+              <div className="ims-metric-value">
+                {formatNumber(stats.receivedQty)}
               </div>
             </div>
           </div>
-          <div className="ims-table-wrapper">
-            <table className="ims-table ims-table--compact">
-              <thead>
-                <tr>
-                  <th>Purchase</th>
-                  <th>Status</th>
-                  <th>Qty</th>
-                  <th>Proposed delivery</th>
-                </tr>
-              </thead>
-              <tbody>
-                {stats.orders.map((order) => (
-                  <tr key={order.id}>
-                    <td>
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))",
+              gap: "0.75rem",
+            }}
+          >
+            {stats.orders.map((order) => {
+              const theme =
+                purchaseStatusThemes[order.status] ?? purchaseStatusThemes.draft;
+              return (
+                <div
+                  key={order.id}
+                  className="card"
+                  style={{ padding: "0.85rem", display: "flex", flexDirection: "column", gap: "0.45rem" }}
+                >
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "flex-start",
+                      gap: "0.5rem",
+                    }}
+                  >
+                    <div>
                       <Link
                         href={`/purchasing/${order.id}`}
                         className="ims-table-link"
@@ -808,16 +864,34 @@ const PurchasePipelineCard = ({
                       <div style={{ fontSize: "0.8rem", color: "#4b5563" }}>
                         {order.reference || "No reference"}
                       </div>
-                    </td>
-                    <td style={{ textTransform: "capitalize" }}>
-                      {order.status.replace("_", " ")}
-                    </td>
-                    <td>{formatNumber(order.qty)}</td>
-                    <td>{formatDateShort(order.proposedDeliveryDate)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+                    </div>
+                    <span
+                      style={{
+                        display: "inline-flex",
+                        padding: "0.1rem 0.45rem",
+                        borderRadius: "999px",
+                        fontSize: "0.75rem",
+                        fontWeight: 600,
+                        backgroundColor: theme.bg,
+                        color: theme.color,
+                        border: `1px solid ${theme.border}`,
+                        textTransform: "capitalize",
+                        whiteSpace: "nowrap",
+                      }}
+                    >
+                      {theme.label}
+                    </span>
+                  </div>
+                  <div>
+                    <div className="ims-metric-label">Quantity</div>
+                    <div className="ims-metric-value">{formatNumber(order.qty)}</div>
+                  </div>
+                  <div className="ims-metric-note">
+                    Delivery: {formatDateShort(order.proposedDeliveryDate)}
+                  </div>
+                </div>
+              );
+            })}
           </div>
         </>
       )}
@@ -1279,6 +1353,8 @@ const SummaryCard = ({
   detailType,
   canEdit,
   isAdmin,
+  locationOptions,
+  locationOptionsLoading,
   onUpdated,
 }: {
   item: InventoryItem;
@@ -1286,6 +1362,8 @@ const SummaryCard = ({
   detailType: InventoryDetailType;
   canEdit: boolean;
   isAdmin: boolean;
+  locationOptions: string[];
+  locationOptionsLoading: boolean;
   onUpdated: () => void;
 }) => {
   const [editing, setEditing] = useState(false);
@@ -1295,6 +1373,12 @@ const SummaryCard = ({
     name: item.name ?? "",
     shortCode: item.shortCode ?? "",
     category: item.category ?? "",
+    owner: item.subAssemblyOwner ?? "",
+    storageLocation:
+      item.storageLocation ??
+      locationOptions[0] ??
+      WAREHOUSE_LOCATION_DEFAULTS[0],
+    dueDate: item.dueDate ? item.dueDate.toISOString().split("T")[0] : "",
     supplier1: item.supplier1 ?? "",
     supplier2: item.supplier2 ?? "",
     description: item.description ?? "",
@@ -1307,13 +1391,32 @@ const SummaryCard = ({
       name: item.name ?? "",
       shortCode: item.shortCode ?? "",
       category: item.category ?? "",
+      owner: item.subAssemblyOwner ?? "",
+      storageLocation:
+        item.storageLocation ??
+        locationOptions[0] ??
+        WAREHOUSE_LOCATION_DEFAULTS[0],
+      dueDate: item.dueDate ? item.dueDate.toISOString().split("T")[0] : "",
       supplier1: item.supplier1 ?? "",
       supplier2: item.supplier2 ?? "",
       description: item.description ?? "",
       usefulLifeMonths:
         item.usefulLifeMonths != null ? String(item.usefulLifeMonths) : "",
-    });
+  });
   }, [item]);
+
+  useEffect(() => {
+    if (detailType !== "subAssemblies") return;
+    if (!locationOptions.length) return;
+    setForm((prev) => ({
+      ...prev,
+      storageLocation:
+        prev.storageLocation && locationOptions.includes(prev.storageLocation)
+          ? prev.storageLocation
+          : locationOptions[0],
+      dueDate: prev.dueDate,
+    }));
+  }, [detailType, locationOptions]);
 
   const hasPermission =
     detailType === "components" ? isAdmin : canEdit;
@@ -1380,6 +1483,35 @@ const SummaryCard = ({
           : "—",
     });
   }
+  if (detailType === "subAssemblies") {
+    summaryRows.push(
+      {
+        key: "owner",
+        label: "Owner",
+        value: item.subAssemblyOwner ?? "—",
+      },
+      {
+        key: "storageLocation",
+        label: "Storage location",
+        value: item.storageLocation ?? "—",
+      },
+      {
+        key: "dueDate",
+        label: "Due date",
+        value: item.dueDate
+          ? item.dueDate.toLocaleDateString()
+          : "—",
+      },
+      {
+        key: "manufactureStatus",
+        label: "Manufacture status",
+        value:
+          item.manufactureStatus === "manufacture_complete"
+            ? "Manufacture complete"
+            : "Start manufacture",
+      },
+    );
+  }
   let hiddenKeys: Set<string> | null = null;
   if (detailType === "subAssemblies") {
     hiddenKeys = new Set([
@@ -1418,6 +1550,12 @@ const SummaryCard = ({
       name: item.name ?? "",
       shortCode: item.shortCode ?? "",
       category: item.category ?? "",
+      owner: item.subAssemblyOwner ?? "",
+      storageLocation:
+        item.storageLocation ??
+        locationOptions[0] ??
+        WAREHOUSE_LOCATION_DEFAULTS[0],
+      dueDate: item.dueDate ? item.dueDate.toISOString().split("T")[0] : "",
       supplier1: item.supplier1 ?? "",
       supplier2: item.supplier2 ?? "",
       description: item.description ?? "",
@@ -1464,6 +1602,13 @@ const SummaryCard = ({
       if (showSupplierFields) {
         payload.supplier1 = form.supplier1.trim() || null;
         payload.supplier2 = form.supplier2.trim() || null;
+      }
+      if (detailType === "subAssemblies") {
+        payload.subAssemblyOwner = form.owner.trim() || null;
+        payload.storageLocation = form.storageLocation || "Downstairs";
+        payload.dueDate = form.dueDate
+          ? Timestamp.fromDate(new Date(form.dueDate))
+          : null;
       }
       await updateDoc(doc(db, "items", item.id), payload);
       setEditing(false);
@@ -1585,6 +1730,57 @@ const SummaryCard = ({
               onChange={(e) => handleChange("category", e.target.value)}
             />
           </div>
+          {detailType === "subAssemblies" && (
+            <div className="ims-field-row">
+              <div className="ims-field">
+                <label className="ims-field-label" htmlFor="summaryOwner">
+                  Owner
+                </label>
+                <input
+                  id="summaryOwner"
+                  className="ims-field-input"
+                  value={form.owner}
+                  onChange={(e) => handleChange("owner", e.target.value)}
+                  placeholder="Who looks after this assembly?"
+                />
+              </div>
+              <div className="ims-field">
+                <label className="ims-field-label" htmlFor="summaryStorageLocation">
+                  Storage location
+                </label>
+                <select
+                  id="summaryStorageLocation"
+                  className="ims-field-input"
+                  value={form.storageLocation}
+                  onChange={(e) =>
+                    handleChange(
+                      "storageLocation",
+                      e.target.value as (typeof form)["storageLocation"],
+                    )
+                  }
+                  disabled={locationOptionsLoading}
+                >
+                  {locationOptions.map((option) => (
+                    <option key={option} value={option}>
+                      {option}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="ims-field">
+                <label className="ims-field-label" htmlFor="summaryDueDate">
+                  Due date
+                </label>
+                <input
+                  id="summaryDueDate"
+                  type="date"
+                  className="ims-field-input"
+                  value={form.dueDate}
+                  onChange={(e) => handleChange("dueDate", e.target.value)}
+                />
+              </div>
+            </div>
+          )}
           {showSupplierFields && (
             <div className="ims-field-row">
               <div className="ims-field">
@@ -1972,7 +2168,20 @@ type ManufactureSubAssemblyCardProps = {
   components: RelationshipEntry[];
   canManufacture: boolean;
   saving: boolean;
-  onManufacture: (quantity: number) => Promise<void>;
+  locationOptions: string[];
+  locationOptionsLoading: boolean;
+  ownerOptions: { id: string; label: string; email: string }[];
+  ownerLoading: boolean;
+  componentDirectory: Record<
+    string,
+    { availableQty?: number | null; unitCost?: number | null; name?: string; sku?: string | null }
+  >;
+  onManufacture: (payload: {
+    quantity: number;
+    storageLocation: string;
+    ownerId: string;
+    dueDate?: string;
+  }) => Promise<void>;
 };
 
 const ManufactureSubAssemblyCard = ({
@@ -1980,9 +2189,24 @@ const ManufactureSubAssemblyCard = ({
   components,
   canManufacture,
   saving,
+  locationOptions,
+  locationOptionsLoading,
+  ownerOptions,
+  ownerLoading,
+  componentDirectory,
   onManufacture,
 }: Omit<ManufactureSubAssemblyCardProps, "onClose">) => {
   const [quantity, setQuantity] = useState("1");
+  const [storageLocation, setStorageLocation] = useState(() => {
+    const firstLocation =
+      (locationOptions && locationOptions.length ? locationOptions[0] : null) ??
+      WAREHOUSE_LOCATION_DEFAULTS[0];
+    return item.storageLocation ?? firstLocation;
+  });
+  const [ownerId, setOwnerId] = useState("");
+  const [dueDate, setDueDate] = useState(
+    item.dueDate ? item.dueDate.toISOString().split("T")[0] : "",
+  );
   const [formError, setFormError] = useState<string | null>(null);
   const parsedQuantity = Number(quantity);
   const manufactureQty =
@@ -1992,15 +2216,30 @@ const ManufactureSubAssemblyCard = ({
   const rows = components
     .map((component) => {
       const perAssembly = Number(component.quantity) || 0;
+      const available =
+        componentDirectory?.[component.id]?.availableQty ??
+        (component as any)?.availableQty ??
+        null;
+      const supports =
+        available != null && perAssembly > 0
+          ? Math.floor(available / perAssembly)
+          : null;
       return {
         id: component.id,
         name: component.name,
         sku: component.sku ?? null,
         perAssembly,
         totalRequired: perAssembly * manufactureQty,
+        available,
+        supports,
       };
     })
     .filter((row) => row.perAssembly > 0);
+
+  const feasible = rows
+    .map((row) => row.supports)
+    .filter((value): value is number => value != null && Number.isFinite(value));
+  const maxBuildable = feasible.length ? Math.min(...feasible) : null;
 
   const ready = canManufacture && manufactureQty > 0 && rows.length > 0;
 
@@ -2010,7 +2249,12 @@ const ManufactureSubAssemblyCard = ({
       return;
     }
     setFormError(null);
-    await onManufacture(manufactureQty);
+    await onManufacture({
+      quantity: manufactureQty,
+      storageLocation: storageLocation || item.storageLocation || "Downstairs",
+      ownerId,
+      dueDate,
+    });
   };
 
   return (
@@ -2023,21 +2267,99 @@ const ManufactureSubAssemblyCard = ({
             units to the manufactured bucket for this assembly.
           </p>
         </div>
+        <div className="ims-page-actions">
+          <button
+            type="button"
+            className="ims-primary-button"
+            onClick={handleSubmit}
+            disabled={saving || !ready}
+          >
+            {saving ? "Manufacturing…" : "Confirm manufacture"}
+          </button>
+        </div>
       </div>
-      <div className="ims-form-stack" style={{ gap: "0.75rem" }}>
-        <div className="ims-field">
-          <label className="ims-field-label" htmlFor="manufactureQuantity">
-            Units to manufacture
-          </label>
-          <input
-            id="manufactureQuantity"
-            type="number"
-            min="1"
-            step="1"
-            className="ims-field-input"
-            value={quantity}
-            onChange={(e) => setQuantity(e.target.value)}
-          />
+      <div className="ims-form-stack" style={{ gap: "0.85rem" }}>
+        <div className="ims-field-row">
+          <div className="ims-field">
+            <label className="ims-field-label" htmlFor="manufactureQuantity">
+              Units to manufacture
+            </label>
+            <input
+              id="manufactureQuantity"
+              type="number"
+              min="1"
+              step="1"
+              className="ims-field-input"
+              value={quantity}
+              onChange={(e) => setQuantity(e.target.value)}
+            />
+            {maxBuildable != null && (
+              <p
+                className="ims-field-help"
+                style={
+                  Number(quantity) > maxBuildable
+                    ? { color: "#b45309", fontWeight: 600 }
+                    : undefined
+                }
+              >
+                Max based on current component stock: {maxBuildable}. You can still request
+                more, but components may run short.
+              </p>
+            )}
+          </div>
+          <div className="ims-field">
+            <label className="ims-field-label" htmlFor="manufactureStorage">
+              Storage location
+            </label>
+            <select
+              id="manufactureStorage"
+              className="ims-field-input"
+              value={storageLocation}
+              onChange={(e) => setStorageLocation(e.target.value)}
+              disabled={locationOptionsLoading}
+            >
+              {(locationOptions && locationOptions.length
+                ? locationOptions
+                : WAREHOUSE_LOCATION_DEFAULTS
+              ).map((option) => (
+                <option key={option} value={option}>
+                  {option}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="ims-field">
+            <label className="ims-field-label" htmlFor="manufactureOwner">
+              Owner
+            </label>
+            <select
+              id="manufactureOwner"
+              className="ims-field-input"
+              value={ownerId}
+              onChange={(e) => setOwnerId(e.target.value)}
+              disabled={ownerLoading}
+            >
+              <option value="">Select owner…</option>
+              {ownerOptions.map((option) => (
+                <option key={option.id} value={option.id}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="ims-field">
+            <label className="ims-field-label" htmlFor="manufactureDueDate">
+              Due by
+            </label>
+            <input
+              id="manufactureDueDate"
+              type="date"
+              className="ims-field-input"
+              value={dueDate}
+              onChange={(e) => setDueDate(e.target.value)}
+            />
+            <p className="ims-field-help">Optional due date for this manufacturing run.</p>
+          </div>
         </div>
         {rows.length === 0 ? (
           <p className="ims-table-empty" style={{ margin: 0 }}>
@@ -2051,6 +2373,8 @@ const ManufactureSubAssemblyCard = ({
                   <th>Component</th>
                   <th>Per assembly</th>
                   <th>Total for run</th>
+                  <th>Available</th>
+                  <th>Supports</th>
                 </tr>
               </thead>
               <tbody>
@@ -2066,6 +2390,10 @@ const ManufactureSubAssemblyCard = ({
                     </td>
                     <td>{formatNumber(row.perAssembly)}</td>
                     <td>{formatNumber(row.totalRequired)}</td>
+                    <td>{row.available != null ? formatNumber(row.available) : "—"}</td>
+                    <td>
+                      {row.supports != null ? `${formatNumber(row.supports)} runs` : "—"}
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -2080,14 +2408,6 @@ const ManufactureSubAssemblyCard = ({
             {formError}
           </div>
         )}
-        <button
-          type="button"
-          className="ims-primary-button"
-          onClick={handleSubmit}
-          disabled={saving || !ready}
-        >
-          {saving ? "Manufacturing…" : "Confirm manufacture"}
-        </button>
       </div>
     </section>
   );
@@ -2099,7 +2419,19 @@ type ManufactureSubAssemblyOverlayProps = {
   canManufacture: boolean;
   saving: boolean;
   onClose: () => void;
-  onManufacture: (quantity: number) => Promise<void>;
+  onManufacture: (payload: {
+    quantity: number;
+    storageLocation: string;
+    ownerId: string;
+  }) => Promise<void>;
+  locationOptions: string[];
+  locationOptionsLoading: boolean;
+  ownerOptions: { id: string; label: string; email: string }[];
+  ownerLoading: boolean;
+  componentDirectory: Record<
+    string,
+    { availableQty?: number | null; unitCost?: number | null; name?: string; sku?: string | null }
+  >;
 };
 
 const ManufactureSubAssemblyOverlay = ({
@@ -2109,6 +2441,11 @@ const ManufactureSubAssemblyOverlay = ({
   saving,
   onClose,
   onManufacture,
+  locationOptions,
+  locationOptionsLoading,
+  ownerOptions,
+  ownerLoading,
+  componentDirectory,
 }: ManufactureSubAssemblyOverlayProps) => {
   const content = (
     <div
@@ -2155,6 +2492,11 @@ const ManufactureSubAssemblyOverlay = ({
           canManufacture={canManufacture}
           saving={saving}
           onManufacture={onManufacture}
+          locationOptions={locationOptions}
+          locationOptionsLoading={locationOptionsLoading}
+          ownerOptions={ownerOptions}
+          ownerLoading={ownerLoading}
+          componentDirectory={componentDirectory}
         />
       </div>
     </div>
@@ -2197,14 +2539,15 @@ export default function InventoryItemDetailPage({
   const [sensorExtraOptions, setSensorExtraOptions] = useState<
     SensorExtraOption[]
   >([]);
-  const [purchaseStats, setPurchaseStats] = useState<{
-    totalQty: number;
-    draftQty: number;
-    paidQty: number;
-    orders: PurchaseOrderSummary[];
-  } | null>(null);
+  const [purchaseStats, setPurchaseStats] = useState<ItemPurchaseStats | null>(null);
   const [purchaseStatsLoading, setPurchaseStatsLoading] = useState(false);
   const [purchaseStatsError, setPurchaseStatsError] = useState<string | null>(null);
+  const [locationOptions, setLocationOptions] = useState<string[]>(WAREHOUSE_LOCATION_DEFAULTS);
+  const [locationOptionsLoading, setLocationOptionsLoading] = useState(false);
+  const [ownerOptions, setOwnerOptions] = useState<
+    { id: string; label: string; email: string }[]
+  >([]);
+  const [ownerLoading, setOwnerLoading] = useState(false);
   const { canEdit, isAdmin } = useAuth();
 
   useEffect(() => {
@@ -2239,6 +2582,53 @@ export default function InventoryItemDetailPage({
   }, [itemId, reloadKey]);
 
   useEffect(() => {
+    if (detailType !== "subAssemblies") return;
+    const loadLocations = async () => {
+      setLocationOptionsLoading(true);
+      try {
+        const options = await fetchWarehouseLocations();
+        setLocationOptions(options);
+      } catch (err) {
+        console.error("Error loading warehouse locations", err);
+      } finally {
+        setLocationOptionsLoading(false);
+      }
+    };
+    loadLocations();
+  }, [detailType]);
+
+  useEffect(() => {
+    if (detailType !== "subAssemblies") return;
+    const loadOwners = async () => {
+      setOwnerLoading(true);
+      try {
+        const snap = await getDocs(collection(db, "users"));
+        const options: { id: string; label: string; email: string }[] = [];
+        snap.forEach((docSnap) => {
+          const data = docSnap.data() as any;
+          const status = (data.accountStatus ?? "").toString();
+          if (
+            status === "admin" ||
+            status === "coreUser" ||
+            status === "core user" ||
+            status === "core-user"
+          ) {
+            const email = data.email ?? "Unknown user";
+            options.push({ id: docSnap.id, label: email, email });
+          }
+        });
+        options.sort((a, b) => a.label.localeCompare(b.label));
+        setOwnerOptions(options);
+      } catch (err) {
+        console.error("Error loading owners", err);
+      } finally {
+        setOwnerLoading(false);
+      }
+    };
+    loadOwners();
+  }, [detailType]);
+
+  useEffect(() => {
     if (!item || !item.components.length) {
       setComponentDirectory({});
       return;
@@ -2270,6 +2660,7 @@ export default function InventoryItemDetailPage({
                 sku: data.sku ?? data.shortCode ?? null,
                 unitCost:
                   parseNumber(data.pricePerUnit) ?? parseNumber(data.standardCost),
+                availableQty: parseNumber(data.inventoryQty),
               };
             } catch {
               return null;
@@ -2279,7 +2670,7 @@ export default function InventoryItemDetailPage({
         if (cancelled) return;
         const directory: Record<
           string,
-          { name: string; sku?: string | null; unitCost?: number | null }
+          { name: string; sku?: string | null; unitCost?: number | null; availableQty?: number | null }
         > = {};
         records.forEach((record) => {
           if (!record) return;
@@ -2287,6 +2678,7 @@ export default function InventoryItemDetailPage({
             name: record.name,
             sku: record.sku,
             unitCost: record.unitCost ?? null,
+            availableQty: record.availableQty ?? null,
           };
         });
         setComponentDirectory(directory);
@@ -2418,9 +2810,10 @@ export default function InventoryItemDetailPage({
         const ref = collection(db, "purchases");
         const q = query(ref, where("lineItemIds", "array-contains", item.id));
         const snap = await getDocs(q);
-        let totalQty = 0;
+        let onOrderQty = 0;
         let draftQty = 0;
-        let paidQty = 0;
+        let sentQty = 0;
+        let receivedQty = 0;
         const orders: PurchaseOrderSummary[] = [];
 
         snap.forEach((purchaseDoc) => {
@@ -2432,13 +2825,16 @@ export default function InventoryItemDetailPage({
             return Number.isFinite(qty) && qty > 0 ? sum + qty : sum;
           }, 0);
           if (qtyForItem <= 0) return;
-          const status =
-            (data.status as PurchaseStatus) ?? "draft";
-          totalQty += qtyForItem;
-          if (status === "draft") {
-            draftQty += qtyForItem;
-          } else if (status === "paid") {
-            paidQty += qtyForItem;
+          const status = normalizePurchaseStatus(data.status as any);
+          if (status === "goods_received") {
+            receivedQty += qtyForItem;
+          } else {
+            onOrderQty += qtyForItem;
+            if (status === "draft") {
+              draftQty += qtyForItem;
+            } else if (status === "sent") {
+              sentQty += qtyForItem;
+            }
           }
           orders.push({
             id: purchaseDoc.id,
@@ -2462,9 +2858,10 @@ export default function InventoryItemDetailPage({
 
         if (!cancelled) {
           setPurchaseStats({
-            totalQty,
+            onOrderQty,
             draftQty,
-            paidQty,
+            sentQty,
+            receivedQty,
             orders,
           });
         }
@@ -2506,7 +2903,12 @@ export default function InventoryItemDetailPage({
     });
   }, [item, componentDirectory]);
 
-  const handleManufactureSubAssembly = async (units: number) => {
+  const handleManufactureSubAssembly = async (payload: {
+    quantity: number;
+    storageLocation: string;
+    ownerId: string;
+    dueDate?: string;
+  }) => {
     if (!item || detailType !== "subAssemblies") return;
     if (!canEdit) {
       setActionError("You do not have permission to perform this action.");
@@ -2516,10 +2918,11 @@ export default function InventoryItemDetailPage({
       setActionError("Add component criteria before manufacturing assemblies.");
       return;
     }
-    if (!Number.isFinite(units) || units <= 0) {
+    if (!Number.isFinite(payload.quantity) || payload.quantity <= 0) {
       setActionError("Enter a valid quantity to manufacture.");
       return;
     }
+    const units = payload.quantity;
     setProcessingAction(true);
     setActionError(null);
     setActionMessage(null);
@@ -2572,16 +2975,26 @@ export default function InventoryItemDetailPage({
         });
         summaryParts.push(`${totalRequired} × ${componentName}`);
       });
-      const manufacturedTotal = (item.inventoryQty ?? 0) + units;
+      const manufacturedTotal = (item.wipQty ?? 0) + units;
       batch.update(doc(db, "items", item.id), {
-        inventoryQty: increment(units),
+        wipQty: increment(units),
+        subAssemblyOwner:
+          payload.ownerId ||
+          item.subAssemblyOwner ||
+          null,
+        storageLocation: payload.storageLocation || item.storageLocation || "Downstairs",
+        dueDate: payload.dueDate
+          ? Timestamp.fromDate(new Date(payload.dueDate))
+          : null,
+        manufactureStatus: "start_manufacture",
+        manufacturePlannedQty: units,
         updatedAt: now,
         inventoryHistory: arrayUnion({
           id: `${manufactureId}-assembly`,
           at: now,
-          bucket: "Production → Manufactured",
+          bucket: "Production → WIP",
           fromBucket: "Production",
-          toBucket: "Manufactured",
+          toBucket: "WIP",
           changeType: "subAssembly",
           quantity: manufacturedTotal,
           delta: units,
@@ -2670,6 +3083,14 @@ export default function InventoryItemDetailPage({
             ← Back to inventory
           </Link>
           {detailType === "subAssemblies" && (
+            <Link
+              href="/inventory/sub-assemblies/pipeline"
+              className="ims-secondary-button"
+            >
+              Pipeline
+            </Link>
+          )}
+          {detailType === "subAssemblies" && (
             <button
               type="button"
               className="ims-primary-button"
@@ -2725,6 +3146,8 @@ export default function InventoryItemDetailPage({
               detailType={detailType}
               canEdit={canEdit}
               isAdmin={isAdmin}
+              locationOptions={locationOptions}
+              locationOptionsLoading={locationOptionsLoading}
               onUpdated={() => setReloadKey((prev) => prev + 1)}
             />
 
@@ -2809,18 +3232,23 @@ export default function InventoryItemDetailPage({
         manufacturePanelOpen &&
         item &&
         componentsWithNames.length > 0 && (
-          <ManufactureSubAssemblyOverlay
-            item={item}
-            components={componentsWithNames}
-            canManufacture={
-              canEdit &&
-              componentsWithNames.some((component) => (component.quantity ?? 0) > 0)
-            }
-            saving={processingAction}
-            onClose={() => setManufacturePanelOpen(false)}
-            onManufacture={handleManufactureSubAssembly}
-          />
-        )}
+            <ManufactureSubAssemblyOverlay
+              item={item}
+              components={componentsWithNames}
+              canManufacture={
+                canEdit &&
+                componentsWithNames.some((component) => (component.quantity ?? 0) > 0)
+              }
+              saving={processingAction}
+              onClose={() => setManufacturePanelOpen(false)}
+              onManufacture={handleManufactureSubAssembly}
+              locationOptions={locationOptions}
+              locationOptionsLoading={locationOptionsLoading}
+              ownerOptions={ownerOptions}
+              ownerLoading={ownerLoading}
+              componentDirectory={componentDirectory}
+            />
+          )}
     </main>
   );
 }

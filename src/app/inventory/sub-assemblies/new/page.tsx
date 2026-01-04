@@ -14,6 +14,10 @@ import {
   Timestamp,
 } from "firebase/firestore";
 import { normalizeItemType } from "@/lib/inventoryPaths";
+import {
+  fetchWarehouseLocations,
+  WAREHOUSE_LOCATION_DEFAULTS,
+} from "@/lib/warehouseLocations";
 
 type ComponentOption = {
   id: string;
@@ -26,6 +30,9 @@ type FormState = {
   name: string;
   sku: string;
   price: string;
+  owner: string;
+  dueDate: string;
+  storageLocation: string;
   componentQuantities: Record<string, number>;
 };
 
@@ -33,6 +40,9 @@ const initialState: FormState = {
   name: "",
   sku: "",
   price: "",
+  owner: "",
+  dueDate: "",
+  storageLocation: WAREHOUSE_LOCATION_DEFAULTS[0],
   componentQuantities: {},
 };
 
@@ -46,6 +56,8 @@ export default function NewSubAssemblyPage() {
   const router = useRouter();
   const [form, setForm] = useState<FormState>(initialState);
   const [components, setComponents] = useState<ComponentOption[]>([]);
+  const [locations, setLocations] = useState<string[]>(WAREHOUSE_LOCATION_DEFAULTS);
+  const [locationLoading, setLocationLoading] = useState(false);
   const [filter, setFilter] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -109,6 +121,25 @@ type ComponentCandidate = ComponentOption & { normalizedType: string };
     };
 
     loadComponents();
+  }, []);
+
+  useEffect(() => {
+    const loadLocations = async () => {
+      setLocationLoading(true);
+      try {
+        const options = await fetchWarehouseLocations();
+        setLocations(options);
+        setForm((prev) => ({
+          ...prev,
+          storageLocation: prev.storageLocation || options[0] || WAREHOUSE_LOCATION_DEFAULTS[0],
+        }));
+      } catch (err) {
+        console.error("Error loading warehouse locations", err);
+      } finally {
+        setLocationLoading(false);
+      }
+    };
+    loadLocations();
   }, []);
 
   const filteredComponents = useMemo(() => {
@@ -258,6 +289,10 @@ type ComponentCandidate = ComponentOption & { normalizedType: string };
         name: trimmedName,
         shortName: trimmedName,
         description: null,
+        subAssemblyOwner: form.owner.trim() || null,
+        storageLocation: form.storageLocation || "Downstairs",
+        manufactureStatus: "start_manufacture",
+        dueDate: form.dueDate ? Timestamp.fromDate(new Date(form.dueDate)) : null,
         itemType: "sub assembly",
         category: "Unit",
         components: componentLines,
@@ -361,6 +396,65 @@ type ComponentCandidate = ComponentOption & { normalizedType: string };
               <p className="ims-field-help">
                 Preview: {estimatedCostLabel} (components:{" "}
                 {currencyFormatter.format(estimatedComponentCost)})
+              </p>
+            </div>
+          </div>
+
+          <div className="ims-field-row">
+            <div className="ims-field">
+              <label className="ims-field-label" htmlFor="dueDate">
+                Due date
+              </label>
+              <input
+                id="dueDate"
+                type="date"
+                className="ims-field-input"
+                value={form.dueDate}
+                onChange={(e) => handleChange("dueDate", e.target.value)}
+              />
+              <p className="ims-field-help">
+                Optional target date for completing this assembly.
+              </p>
+            </div>
+          </div>
+
+          <div className="ims-field-row">
+            <div className="ims-field">
+              <label className="ims-field-label" htmlFor="owner">
+                Sub-assembly owner
+              </label>
+              <input
+                id="owner"
+                className="ims-field-input"
+                value={form.owner}
+                onChange={(e) => handleChange("owner", e.target.value)}
+                placeholder="Who owns this assembly?"
+              />
+            </div>
+            <div className="ims-field">
+              <label className="ims-field-label" htmlFor="storageLocation">
+                Storage location
+              </label>
+              <select
+                id="storageLocation"
+                className="ims-field-input"
+                value={form.storageLocation}
+                onChange={(e) =>
+                  handleChange(
+                    "storageLocation",
+                    e.target.value,
+                  )
+                }
+                disabled={locationLoading}
+              >
+                {locations.map((option) => (
+                  <option key={option} value={option}>
+                    {option}
+                  </option>
+                ))}
+              </select>
+              <p className="ims-field-help">
+                Default is {locations[0] ?? "Downstairs"}; adjust if the stock lives elsewhere.
               </p>
             </div>
           </div>

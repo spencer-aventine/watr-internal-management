@@ -63,6 +63,11 @@ export default function ProjectsWipPage() {
   const [dragOverColumn, setDragOverColumn] = useState<
     ProjectStatus | null
   >(null);
+  const [showAll, setShowAll] = useState<Record<ProjectStatus, boolean>>({
+    reserved: false,
+    wip: false,
+    complete: false,
+  });
 
   const loadData = async () => {
     setLoading(true);
@@ -365,12 +370,19 @@ export default function ProjectsWipPage() {
   const completedProjects = projects
     .filter((p) => p.status === "complete")
     .filter(filterProject);
+  const visibleReserved = showAll.reserved
+    ? reservedProjects
+    : reservedProjects.slice(0, 10);
+  const visibleWip = showAll.wip ? wipProjects : wipProjects.slice(0, 10);
+  const visibleCompleted = showAll.complete
+    ? completedProjects
+    : completedProjects.slice(0, 10);
 
   return (
     <main className="ims-content">
       <section className="ims-page-header ims-page-header--with-actions">
         <div>
-          <h1 className="ims-page-title">Projects &amp; WIP</h1>
+          <h1 className="ims-page-title">Project pipeline</h1>
           <p className="ims-page-subtitle">
             Each card represents a project. Inventory is removed from the
             warehouse when it&apos;s reserved, then flows through Reserved,
@@ -432,7 +444,7 @@ export default function ProjectsWipPage() {
               </span>
             </header>
 
-            {reservedProjects.map((project) => {
+            {visibleReserved.map((project) => {
               const visibleItems = project.items.filter(
                 (line) => line.itemType !== "sensorExtras",
               );
@@ -506,6 +518,19 @@ export default function ProjectsWipPage() {
                 No reserved projects. Create one to start tracking stock.
               </p>
             )}
+
+            {!showAll.reserved && reservedProjects.length > 10 && (
+              <button
+                type="button"
+                className="ims-secondary-button"
+                onClick={() =>
+                  setShowAll((prev) => ({ ...prev, reserved: true }))
+                }
+                style={{ marginTop: "0.75rem" }}
+              >
+                Show more ({reservedProjects.length - 10} more)
+              </button>
+            )}
           </div>
 
           {/* WIP column */}
@@ -527,7 +552,7 @@ export default function ProjectsWipPage() {
               </span>
             </header>
 
-            {wipProjects.map((project) => {
+            {visibleWip.map((project) => {
               const visibleItems = project.items.filter(
                 (line) => line.itemType !== "sensorExtras",
               );
@@ -601,6 +626,19 @@ export default function ProjectsWipPage() {
                 No projects in WIP. Drag reserved cards here to start work.
               </p>
             )}
+
+            {!showAll.wip && wipProjects.length > 10 && (
+              <button
+                type="button"
+                className="ims-secondary-button"
+                onClick={() =>
+                  setShowAll((prev) => ({ ...prev, wip: true }))
+                }
+                style={{ marginTop: "0.75rem" }}
+              >
+                Show more ({wipProjects.length - 10} more)
+              </button>
+            )}
           </div>
 
           {/* Complete column */}
@@ -624,7 +662,7 @@ export default function ProjectsWipPage() {
               </span>
             </header>
 
-            {completedProjects.map((project) => {
+            {visibleCompleted.map((project) => {
               const visibleItems = project.items.filter(
                 (line) => line.itemType !== "sensorExtras",
               );
@@ -698,6 +736,19 @@ export default function ProjectsWipPage() {
                 No completed projects yet. As you finish WIP cards, drag
                 them here to update completed stock.
               </p>
+            )}
+
+            {!showAll.complete && completedProjects.length > 10 && (
+              <button
+                type="button"
+                className="ims-secondary-button"
+                onClick={() =>
+                  setShowAll((prev) => ({ ...prev, complete: true }))
+                }
+                style={{ marginTop: "0.75rem" }}
+              >
+                Show more ({completedProjects.length - 10} more)
+              </button>
             )}
           </div>
         </section>

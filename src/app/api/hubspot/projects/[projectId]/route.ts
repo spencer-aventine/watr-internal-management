@@ -1,15 +1,18 @@
 import { NextResponse } from "next/server";
 import {
   fetchHubspotProject,
+  fetchHubspotStageLabel,
   updateHubspotProjectStage,
 } from "@/lib/hubspot";
 
 const mapHubspotProject = (
   payload: Awaited<ReturnType<typeof fetchHubspotProject>>,
+  stageLabelOverride?: string | null,
 ) => {
   const props = payload.properties ?? {};
   const stageId = props.hs_pipeline_stage ?? null;
-  const rawStageLabel = props.hs_pipeline_stage_label;
+  const rawStageLabel =
+    stageLabelOverride ?? props.hs_pipeline_stage_label;
   const stageLabel =
     typeof rawStageLabel === "string" ? rawStageLabel : null;
   return {
@@ -37,7 +40,29 @@ export async function GET(
 
   try {
     const project = await fetchHubspotProject(projectId);
-    return NextResponse.json({ project: mapHubspotProject(project) });
+
+    const props = project.properties ?? {};
+    const stageId = props.hs_pipeline_stage;
+    const pipelineId = props.hs_pipeline;
+
+    let stageLabel: string | null = null;
+    if (pipelineId && stageId && !props.hs_pipeline_stage_label) {
+      try {
+        stageLabel = await fetchHubspotStageLabel(
+          String(pipelineId),
+          String(stageId),
+        );
+      } catch (stageErr) {
+        console.warn(
+          "Unable to load HubSpot stage label; falling back to ID",
+          stageErr,
+        );
+      }
+    }
+
+    return NextResponse.json({
+      project: mapHubspotProject(project, stageLabel),
+    });
   } catch (err: any) {
     console.error("HubSpot project fetch error", err);
     return NextResponse.json(

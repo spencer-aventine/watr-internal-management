@@ -52,6 +52,7 @@ type PurchaseFormState = {
   vendorName: string;
   supplierContact: string;
   supplierAddress: string;
+  vatNumber: string;
   shipTo: string;
   deliveryFee: string;
   reference: string;
@@ -61,7 +62,7 @@ type PurchaseFormState = {
   status: PurchaseStatus;
 };
 
-type PurchaseStatus = "draft" | "paid" | "stock_received";
+type PurchaseStatus = "draft" | "sent" | "goods_received";
 
 const todayIso = () => new Date().toISOString().split("T")[0];
 const nextWeekIso = () => {
@@ -69,6 +70,9 @@ const nextWeekIso = () => {
   date.setDate(date.getDate() + 7);
   return date.toISOString().split("T")[0];
 };
+
+const DEFAULT_SHIP_TO =
+  "Unit 16 Hethel Innovation Centre\nHethel\nNorwich\nEngland\nNR14 8FB";
 
 const emptyLine = (id: number): PurchaseLineState => ({
   id: `line-${id}`,
@@ -85,7 +89,8 @@ export default function PurchasingPage() {
     vendorName: "",
     supplierContact: "",
     supplierAddress: "",
-    shipTo: "",
+    vatNumber: "",
+    shipTo: DEFAULT_SHIP_TO,
     deliveryFee: "",
     reference: "",
     purchaseDate: todayIso(),
@@ -292,7 +297,8 @@ export default function PurchasingPage() {
       vendorName: "",
       supplierContact: "",
       supplierAddress: "",
-      shipTo: "",
+      vatNumber: "",
+      shipTo: DEFAULT_SHIP_TO,
       deliveryFee: "",
       reference: "",
       purchaseDate: todayIso(),
@@ -369,12 +375,13 @@ export default function PurchasingPage() {
         new Set(validLines.map((line) => line.itemId).filter(Boolean)),
       );
 
-      const shouldUpdateStock = form.status === "stock_received";
+      const shouldUpdateStock = form.status === "goods_received";
 
       const purchaseRef = await addDoc(collection(db, "purchases"), {
         vendorName: form.vendorName.trim(),
         supplierContact: form.supplierContact.trim() || null,
         supplierAddress: form.supplierAddress.trim() || null,
+        vatNumber: (form.vatNumber ?? "").trim() || null,
         shipTo: form.shipTo.trim() || null,
         supplierId: selectedSupplierId || null,
         deliveryFee: hasDeliveryFee ? safeDeliveryFee : null,
@@ -503,7 +510,7 @@ export default function PurchasingPage() {
             href="/purchasing/external-po"
             className="ims-secondary-button"
           >
-            Create external PO
+            View external PO
           </Link>
         </div>
       </div>
@@ -673,6 +680,19 @@ export default function PurchasingPage() {
               />
             </div>
             <div className="ims-field">
+              <label className="ims-field-label" htmlFor="vatNumber">
+                VAT number
+              </label>
+              <input
+                id="vatNumber"
+                type="text"
+                className="ims-field-input"
+                value={form.vatNumber || ""}
+                onChange={(e) => handleFormChange("vatNumber", e.target.value)}
+                placeholder="GB123456789"
+              />
+            </div>
+            <div className="ims-field">
               <label className="ims-field-label" htmlFor="purchaseDate">
                 Purchase date
               </label>
@@ -729,11 +749,11 @@ export default function PurchasingPage() {
               }
             >
               <option value="draft">Draft</option>
-              <option value="paid">Paid</option>
-              <option value="stock_received">Stock received</option>
+              <option value="sent">Sent</option>
+              <option value="goods_received">Goods received</option>
             </select>
             <p className="ims-field-help">
-              Inventory updates automatically when status is “Stock received”.
+              Inventory updates automatically when status is “Goods received”.
             </p>
           </div>
         </section>

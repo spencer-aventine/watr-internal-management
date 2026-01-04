@@ -11,6 +11,7 @@ import {
   getDocs,
   orderBy,
   query,
+  Timestamp,
 } from "firebase/firestore";
 
 type PoFormState = {
@@ -53,6 +54,23 @@ const defaultPoNumber = () => {
     String(now.getDate()).padStart(2, "0"),
   ].join("");
   return `PO-${stamp}`;
+};
+
+const timestampToIsoDate = (value: any) => {
+  if (!value) return null;
+  try {
+    if (value instanceof Timestamp) {
+      return value.toDate().toISOString().split("T")[0];
+    }
+    if (typeof value.toDate === "function") {
+      return value.toDate().toISOString().split("T")[0];
+    }
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return null;
+    return date.toISOString().split("T")[0];
+  } catch {
+    return null;
+  }
 };
 
 const emptyLine = (id: number): PoLineState => ({
@@ -217,6 +235,9 @@ export default function ExternalPurchaseOrderPage() {
           id: snap.id,
           vendorName: data.vendorName ?? "Purchase",
         });
+        const purchaseDateIso = timestampToIsoDate(
+          data.purchaseDate ?? data.createdAt ?? null,
+        );
         setForm((prev) => ({
           ...prev,
           supplierName: data.vendorName ?? prev.supplierName,
@@ -224,6 +245,7 @@ export default function ExternalPurchaseOrderPage() {
           supplierAddress: data.supplierAddress ?? prev.supplierAddress,
           shipTo: data.shipTo ?? prev.shipTo,
           poNumber: data.reference ?? prev.poNumber,
+          issueDate: purchaseDateIso ?? prev.issueDate,
           notes: data.notes ?? prev.notes,
         }));
         if (Array.isArray(data.lineItems) && data.lineItems.length > 0) {
@@ -898,19 +920,29 @@ export default function ExternalPurchaseOrderPage() {
 
       <style jsx global>{`
         @media print {
-          .print-hidden {
-            display: none !important;
-          }
           body {
             background: #fff !important;
+            -webkit-print-color-adjust: exact;
+            print-color-adjust: exact;
+          }
+          .print-hidden,
+          .ims-sidebar,
+          .ims-page-header {
+            display: none !important;
+          }
+          /* Only print the PO itself */
+          body * {
+            visibility: hidden;
+          }
+          .po-document,
+          .po-document * {
+            visibility: visible;
           }
           .po-document {
-            box-shadow: none !important;
-            border-radius: 0;
-            margin: 0;
-            max-width: none;
+            position: absolute;
+            left: 0;
+            top: 0;
             width: 100%;
-            padding: 1in;
           }
         }
       `}</style>

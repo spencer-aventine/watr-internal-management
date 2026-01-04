@@ -38,7 +38,13 @@ type PurchaseRecord = {
   stockAppliedAt?: Timestamp | null;
 };
 
-type PurchaseStatus = "draft" | "paid" | "stock_received";
+type PurchaseStatus = "draft" | "sent" | "goods_received";
+
+const normalizeStatus = (value?: string | null): PurchaseStatus => {
+  if (value === "goods_received" || value === "stock_received") return "goods_received";
+  if (value === "sent" || value === "paid") return "sent";
+  return "draft";
+};
 
 const formatCurrency = (value?: number | null) => {
   if (value == null || Number.isNaN(value)) return "—";
@@ -63,8 +69,11 @@ export default function PurchaseHistoryPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [statusUpdatingId, setStatusUpdatingId] = useState<string | null>(null);
-  const [calendarMessage, setCalendarMessage] = useState<string | null>(null);
-  const [calendarError, setCalendarError] = useState<string | null>(null);
+  const [filterText, setFilterText] = useState("");
+  const [filterStatus, setFilterStatus] = useState<PurchaseStatus | "all">("all");
+  const [sortKey, setSortKey] = useState<
+    "vendor-asc" | "vendor-desc" | "date-desc" | "date-asc" | "ref-asc" | "ref-desc"
+  >("date-desc");
 
   useEffect(() => {
     const load = async () => {
@@ -88,7 +97,7 @@ export default function PurchaseHistoryPage() {
             createdAt: data.createdAt ?? null,
             notes: data.notes ?? null,
             lineItems: Array.isArray(data.lineItems) ? data.lineItems : [],
-            status: (data.status as PurchaseStatus) ?? "draft",
+            status: normalizeStatus(data.status),
             stockAppliedAt: data.stockAppliedAt ?? null,
           };
         });
@@ -104,49 +113,6 @@ export default function PurchaseHistoryPage() {
 
     load();
   }, []);
-
-  const purchaseStatuses: PurchaseStatus[] = ["draft", "paid", "stock_received"];
-
-  const toIsoDate = (timestamp?: Timestamp | null) => {
-    if (!timestamp) return null;
-    try {
-      return timestamp.toDate().toISOString().split("T")[0];
-    } catch {
-      return null;
-    }
-  };
-
-  const calendarDays = useMemo(() => {
-    const start = new Date();
-    start.setHours(0, 0, 0, 0);
-    return Array.from({ length: 14 }, (_, idx) => {
-      const date = new Date(start);
-      date.setDate(start.getDate() + idx);
-      return {
-        iso: date.toISOString().split("T")[0],
-        label: date.toLocaleDateString(undefined, {
-          weekday: "short",
-          day: "numeric",
-          month: "short",
-        }),
-      };
-    });
-  }, []);
-
-  const deliveriesByDay = useMemo(() => {
-    const map = new Map<string, PurchaseRecord[]>();
-    purchases.forEach((purchase) => {
-      const iso = toIsoDate(purchase.proposedDeliveryDate);
-      const key = iso ?? "unscheduled";
-      if (!map.has(key)) {
-        map.set(key, []);
-      }
-      map.get(key)!.push(purchase);
-    });
-    return map;
-  }, [purchases]);
-
-  const unscheduledPurchases = deliveriesByDay.get("unscheduled") ?? [];
 
   const applyInventoryFromPurchase = async (
     purchase: PurchaseRecord,
@@ -180,11 +146,9 @@ export default function PurchaseHistoryPage() {
   ) => {
     if (purchase.status === nextStatus) return;
     setStatusUpdatingId(purchase.id);
-    setCalendarMessage(null);
-    setCalendarError(null);
     const now = Timestamp.now();
     const shouldApplyInventory =
-      nextStatus === "stock_received" && !purchase.stockAppliedAt;
+      nextStatus === "goods_received" && !purchase.stockAppliedAt;
     try {
       if (shouldApplyInventory) {
         await applyInventoryFromPurchase(purchase, now);
@@ -207,14 +171,48 @@ export default function PurchaseHistoryPage() {
             : row,
         ),
       );
-      setCalendarMessage("Purchase status updated.");
     } catch (err: any) {
       console.error("Error updating purchase status", err);
-      setCalendarError(err?.message ?? "Unable to update purchase status.");
     } finally {
       setStatusUpdatingId(null);
     }
   };
+
+  const filteredPurchases = useMemo(() => {
+    const text = filterText.trim().toLowerCase();
+    return purchases
+      .filter((purchase) => {
+        if (filterStatus !== "all" && purchase.status !== filterStatus) {
+          return false;
+        }
+        if (!text) return true;
+        const values = [
+          purchase.vendorName,
+          purchase.reference ?? "",
+          purchase.status,
+        ]
+          .filter(Boolean)
+          .map((v) => v.toString().toLowerCase());
+        return values.some((value) => value.includes(text));
+      })
+      .sort((a, b) => {
+        switch (sortKey) {
+          case "vendor-asc":
+            return a.vendorName.localeCompare(b.vendorName);
+          case "vendor-desc":
+            return b.vendorName.localeCompare(a.vendorName);
+          case "ref-asc":
+            return (a.reference ?? "").localeCompare(b.reference ?? "");
+          case "ref-desc":
+            return (b.reference ?? "").localeCompare(a.reference ?? "");
+          case "date-asc":
+            return (a.purchaseDate?.toMillis() ?? 0) - (b.purchaseDate?.toMillis() ?? 0);
+          case "date-desc":
+          default:
+            return (b.purchaseDate?.toMillis() ?? 0) - (a.purchaseDate?.toMillis() ?? 0);
+        }
+      });
+  }, [purchases, filterStatus, filterText, sortKey]);
 
   return (
     <main className="ims-content">
@@ -222,7 +220,7 @@ export default function PurchaseHistoryPage() {
         <div>
           <h1 className="ims-page-title">Purchase history</h1>
           <p className="ims-page-subtitle">
-            A record of every logged purchase, sortable by newest first.
+            A record of every logged purchase with quick filters and sorting.
           </p>
         </div>
         <div className="ims-page-actions">
@@ -241,16 +239,65 @@ export default function PurchaseHistoryPage() {
             <span className="ims-table-count">
               {loading
                 ? "Loading…"
-                : `${purchases.length} purchase${
+                : `${filteredPurchases.length} of ${purchases.length} purchase${
                     purchases.length === 1 ? "" : "s"
                   }`}
             </span>
+          </div>
+          <div
+            style={{
+              display: "flex",
+              gap: "0.5rem",
+              flexWrap: "wrap",
+              alignItems: "center",
+            }}
+          >
+            <input
+              type="text"
+              className="ims-field-input"
+              placeholder="Filter by vendor, reference, or status…"
+              value={filterText}
+              onChange={(e) => setFilterText(e.target.value)}
+              style={{ minWidth: "220px" }}
+            />
+            <select
+              className="ims-field-input"
+              value={filterStatus}
+              onChange={(e) => setFilterStatus(e.target.value as PurchaseStatus | "all")}
+            >
+              <option value="all">All statuses</option>
+              <option value="draft">Draft</option>
+              <option value="sent">Sent</option>
+              <option value="goods_received">Goods received</option>
+            </select>
+            <select
+              className="ims-field-input"
+              value={sortKey}
+              onChange={(e) =>
+                setSortKey(
+                  e.target.value as
+                    | "vendor-asc"
+                    | "vendor-desc"
+                    | "date-desc"
+                    | "date-asc"
+                    | "ref-asc"
+                    | "ref-desc",
+                )
+              }
+            >
+              <option value="date-desc">Newest first</option>
+              <option value="date-asc">Oldest first</option>
+              <option value="vendor-asc">Vendor A–Z</option>
+              <option value="vendor-desc">Vendor Z–A</option>
+              <option value="ref-asc">Reference A–Z</option>
+              <option value="ref-desc">Reference Z–A</option>
+            </select>
           </div>
         </div>
 
         {loading ? (
           <p className="ims-table-empty">Loading purchase history…</p>
-        ) : purchases.length === 0 ? (
+        ) : filteredPurchases.length === 0 ? (
           <p className="ims-table-empty">
             No purchases logged yet. Record your first purchase to populate this
             list.
@@ -267,11 +314,11 @@ export default function PurchaseHistoryPage() {
                   <th>Status</th>
                   <th>Lines</th>
                   <th>Total</th>
-                  <th />
+                  <th>Actions</th>
                 </tr>
               </thead>
               <tbody>
-                {purchases.map((purchase) => (
+                {filteredPurchases.map((purchase) => (
                   <tr key={purchase.id}>
                     <td>{purchase.vendorName}</td>
                     <td>{purchase.reference || "—"}</td>
@@ -282,12 +329,19 @@ export default function PurchaseHistoryPage() {
                     </td>
                     <td>{purchase.lineItems.length}</td>
                     <td>{formatCurrency(purchase.totalAmount)}</td>
-                    <td>
+                    <td style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
+                      <Link
+                        href={`/purchasing/${purchase.id}`}
+                        className="ims-secondary-button"
+                        style={{ padding: "0.35rem 0.65rem", fontSize: "0.82rem" }}
+                      >
+                        Edit
+                      </Link>
                       <Link
                         href={`/purchasing/${purchase.id}`}
                         className="ims-table-link"
                       >
-                        View details →
+                        View →
                       </Link>
                     </td>
                   </tr>
@@ -298,164 +352,6 @@ export default function PurchaseHistoryPage() {
         )}
       </section>
 
-      <section className="card ims-form-section" style={{ marginTop: "1.5rem" }}>
-        <div className="ims-table-header">
-          <div>
-            <h2 className="ims-form-section-title">Delivery calendar</h2>
-            <p className="ims-form-section-subtitle">
-              Proposed deliveries over the next two weeks with quick status updates.
-            </p>
-          </div>
-        </div>
-        {(calendarError || calendarMessage) && (
-          <div
-            className={
-              "ims-alert " +
-              (calendarError ? "ims-alert--error" : "ims-alert--info")
-            }
-            style={{ marginBottom: "0.75rem" }}
-          >
-            {calendarError || calendarMessage}
-          </div>
-        )}
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-            gap: "1rem",
-          }}
-        >
-          {calendarDays.map((day) => {
-            const dayPurchases = deliveriesByDay.get(day.iso) ?? [];
-            return (
-              <div key={day.iso} className="card" style={{ padding: "1rem" }}>
-                <div className="ims-field-label" style={{ marginBottom: "0.35rem" }}>
-                  {day.label}
-                </div>
-                {dayPurchases.length === 0 ? (
-                  <p className="ims-table-empty" style={{ margin: 0 }}>
-                    No deliveries.
-                  </p>
-                ) : (
-                  dayPurchases.map((purchase) => {
-                    const isUpdating = statusUpdatingId === purchase.id;
-                    return (
-                      <div
-                        key={purchase.id}
-                        style={{
-                          borderTop: "1px solid var(--color-border)",
-                          paddingTop: "0.65rem",
-                          marginTop: "0.65rem",
-                        }}
-                      >
-                        <div style={{ fontWeight: 600 }}>
-                          {purchase.vendorName}
-                        </div>
-                        <div style={{ fontSize: "0.85rem", color: "#4b5563" }}>
-                          Ref {purchase.reference || "—"} ·{" "}
-                          {purchase.lineItems.length} line
-                          {purchase.lineItems.length === 1 ? "" : "s"}
-                        </div>
-                        <div className="ims-field" style={{ marginTop: "0.35rem" }}>
-                          <label
-                            className="ims-field-label"
-                            htmlFor={`status-${purchase.id}`}
-                          >
-                            Status
-                          </label>
-                          <select
-                            id={`status-${purchase.id}`}
-                            className="ims-field-input"
-                            value={purchase.status}
-                            onChange={(e) =>
-                              handleStatusUpdate(
-                                purchase,
-                                e.target.value as PurchaseStatus,
-                              )
-                            }
-                            disabled={isUpdating}
-                          >
-                            {purchaseStatuses.map((status) => (
-                              <option key={status} value={status}>
-                                {status.replace("_", " ")}
-                              </option>
-                            ))}
-                          </select>
-                        </div>
-                        <Link
-                          href={`/purchasing/${purchase.id}`}
-                          className="ims-table-link"
-                          style={{ fontSize: "0.85rem" }}
-                        >
-                          View details →
-                        </Link>
-                      </div>
-                    );
-                  })
-                )}
-              </div>
-            );
-          })}
-          {unscheduledPurchases.length > 0 && (
-            <div className="card" style={{ padding: "1rem" }}>
-              <div className="ims-field-label" style={{ marginBottom: "0.35rem" }}>
-                No delivery date
-              </div>
-              {unscheduledPurchases.map((purchase) => {
-                const isUpdating = statusUpdatingId === purchase.id;
-                return (
-                  <div
-                    key={purchase.id}
-                    style={{
-                      borderTop: "1px solid var(--color-border)",
-                      paddingTop: "0.65rem",
-                      marginTop: "0.65rem",
-                    }}
-                  >
-                    <div style={{ fontWeight: 600 }}>{purchase.vendorName}</div>
-                    <div style={{ fontSize: "0.85rem", color: "#4b5563" }}>
-                      Ref {purchase.reference || "—"}
-                    </div>
-                    <div className="ims-field" style={{ marginTop: "0.35rem" }}>
-                      <label
-                        className="ims-field-label"
-                        htmlFor={`status-${purchase.id}-unscheduled`}
-                      >
-                        Status
-                      </label>
-                      <select
-                        id={`status-${purchase.id}-unscheduled`}
-                        className="ims-field-input"
-                        value={purchase.status}
-                        onChange={(e) =>
-                          handleStatusUpdate(
-                            purchase,
-                            e.target.value as PurchaseStatus,
-                          )
-                        }
-                        disabled={isUpdating}
-                      >
-                        {purchaseStatuses.map((status) => (
-                          <option key={status} value={status}>
-                            {status.replace("_", " ")}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                    <Link
-                      href={`/purchasing/${purchase.id}`}
-                      className="ims-table-link"
-                      style={{ fontSize: "0.85rem" }}
-                    >
-                      View details →
-                    </Link>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
-      </section>
     </main>
   );
 }
